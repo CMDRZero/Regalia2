@@ -253,18 +253,16 @@ boardstr = \
 initstr = InitStrFromSetup(boardstr)
 
 ZigInitAlloc()
-boardptr = ZigNewBoardHandle()
-#boardptr2 = ZigNewBoardHandle()
-#print("Got handle:", hex(boardptr % (1<<64)))
-#ZigInitBoardFromStr(boardptr, initstr.encode())
-#got = ZigGenInitStr(boardptr)
-#print(repr(got))
 
+ZigNewBoardHandle()
+
+boardptr = ZigNewBoardHandle()
 state = Board()
-#state.AddNewHandle()
-#bp = ZigNewBoardHandle()
-state.handle = boardptr
+state.AddNewHandle()
 state.FromInitStr(initstr)
+
+ZigNewBoardHandle()
+
 pieces, deco, board = state.RegenRender()
 
 #got = ZigGenInitStr(boardptr)

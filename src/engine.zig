@@ -1,5 +1,6 @@
 const std = @import("std");
 var gAllocator: std.mem.Allocator = undefined;
+var gGpa: std.heap.DebugAllocator(.{}) = undefined;
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -169,8 +170,8 @@ fn ImportPtr(ptr: PYPTR) *Board {
 }
 
 export fn PyInitAlloc() void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}).init;
-    gAllocator = gpa.allocator();
+    gGpa = std.heap.GeneralPurposeAllocator(.{}).init;
+    gAllocator = gGpa.allocator();
 }
 
 export fn PyNewBoardHandle() PYPTR {

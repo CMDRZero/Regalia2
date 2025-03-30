@@ -72,7 +72,7 @@ class Board:
         self.handle = None
         
     def AddNewHandle(self):
-        #self.handle = ZigNewBoardHandle()
+        self.handle = ZigNewBoardHandle()
         pass
 
 
