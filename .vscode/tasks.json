@@ -27,7 +27,7 @@
         {
             "label": "Build zig file",
             "type": "shell",
-            "command": "pushd .. | zig.exe build-lib -dynamic ${relativeFile} | popd",
+            "command": "zig.exe build-lib -dynamic ${relativeFile} && del ${fileBasenameNoExtension}.pdb && del ${fileBasenameNoExtension}.lib && del ${fileBasenameNoExtension}.dll.obj && del ${fileBasenameNoExtension}.lib.obj",
             "group": {
               "kind": "build",
               "isDefault": true

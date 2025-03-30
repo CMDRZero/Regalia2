@@ -10,4 +10,9 @@ i32 = ctypes.c_int32
 i64 = ctypes.c_int64
 
 Pointer = ctypes.pointer
+POINTER = ctypes.POINTER
+
+cStr = ctypes.c_char_p
+
+void = None
 
