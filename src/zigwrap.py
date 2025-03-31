@@ -23,11 +23,17 @@ PyPtr = u64
 parent = '\\'.join(__file__.split('\\')[:-2])
 _enginelib = ctypes.CDLL(f'{parent}\\engine.dll')
 
-#_enginelib.PyGenMoves.argtypes = (PyPtr,)
-#_enginelib.PyGenMoves.restype = void
-@AutoAnnot
-def ZigGenMoves(ptr: PyPtr) -> None:
-    _enginelib.PyGenMoves(ptr)
+_enginelib.PyGenMoves.argtypes = (PyPtr, u8)
+_enginelib.PyGenMoves.restype = POINTER(u32)
+#@AutoAnnot
+def ZigGenMoves(ptr: PyPtr, pos: u8) -> list[int]:
+    retptr = _enginelib.PyGenMoves(ptr, pos)
+    res = []
+    for i in range(100):
+        if (retptr[i] >> 1 % (1 << 7)) == 127:
+            break
+        res.append(DecodeMove(retptr[i]))
+    return res
 
 _enginelib.PyNewBoardHandle.argtypes = ()
 _enginelib.PyNewBoardHandle.restype = PyPtr
@@ -52,6 +58,25 @@ def ZigGenInitStr(ptr: PyPtr) -> str:
     buf = Pointer((u8 * 162)(0))
     _enginelib.PyGenInitStr(ptr, ctypes.addressof(buf.contents))
     return ''.join([chr(x) for x in buf.contents])
+
+
+_enginelib.PyBoardApplyMove.argtypes = (PyPtr, u16)
+_enginelib.PyBoardApplyMove.restype = void
+#@AutoAnnot
+def ZigBoardApplyMove(ptr, move) -> None:
+    _enginelib.PyBoardApplyMove(ptr, move)
+
+def DecodeMove(move: int) -> int:
+    ret = {}
+    ret['orig'] = (move >> 1) % (1<<7)
+    ret['dest'] = (move >> 9) % (1<<7)
+    ret['doRet'] = (move >> 0) % (1<<1)
+    ret['doCap'] = (move >> 8) % (1<<1)
+    ret['doAtk'] = (move >> 16) % (1<<1)
+    if ret['doAtk'] or ret['doCap']:
+        ret['atkDir'] = (move >> 17) % (1<<3)
+    return ret
+
 
 class Board:
     class Cell:
@@ -81,9 +106,16 @@ class Board:
         ZigInitBoardFromStr(self.handle, initstr.encode())
         
     def PullState(self):
-        self.LocFromInitStr(ZigGenInitStr(self.handle))
+        initstr = ZigGenInitStr(self.handle)
+        print(initstr)
+        self.LocFromInitStr(initstr)
+
+    def ApplyMove(self, move):
+        ZigBoardApplyMove(self.handle, move)
+        #self.PullState() #Theoretically not needed
 
     def LocFromInitStr(self, initstr: str):
+        self.body = [[self.Cell() for i in range(9)] for j in range(9)]
         for i, c in enumerate(initstr[:81]):
             if c == 'z': continue
             bv = ord(c) - ord('a')

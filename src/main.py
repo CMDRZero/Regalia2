@@ -250,18 +250,18 @@ boardstr = \
 '   .cic.   '       +'\n'+ \
 '   .i i.   '
 
-initstr = InitStrFromSetup(boardstr)
-
 ZigInitAlloc()
 
-ZigNewBoardHandle()
-
-boardptr = ZigNewBoardHandle()
 state = Board()
 state.AddNewHandle()
-state.FromInitStr(initstr)
+state.FromInitStr(InitStrFromSetup(boardstr))
 
-ZigNewBoardHandle()
+state.ApplyMove(1 << 1 | 37 << 9)
+#state.ApplyMove(2 << 1 | 2 << 9)
+state.PullState()
+print('Moved')
+moves = []
+moves = ZigGenMoves(state.handle, 38)
 
 pieces, deco, board = state.RegenRender()
 
@@ -301,6 +301,17 @@ while run:
 
     for piece, pos in deco:
         DrawPiece(psprites[piece], *pos)
+
+    for move in moves:
+        #print(move)
+        pos = list(divmod(move['dest'], 9))[::-1]
+        if move['doAtk']:
+            pos[1] += (1, 0, -1, 0, 1, -1, -1, 1)[move['atkDir']]/2
+            pos[0] += (0, 1, 0, -1, 1, 1, -1, -1)[move['atkDir']]/2
+        #if move['doCap']:
+        #    pos[1] += (1, 0, -1, 0, 1, -1, -1, 1)[move['atkDir']]
+        #    pos[0] += (0, 1, 0, -1, 1, 1, -1, -1)[move['atkDir']]
+        DrawPiece(tarsqr, *pos)
 
     #DrawPiece(vlock, *(3.5, 0))
     #DrawPiece(vatktar, *(3.5, 0))
