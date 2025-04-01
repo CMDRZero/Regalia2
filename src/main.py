@@ -28,9 +28,9 @@ def SmoothInto(x: float):
 # Return the moves nesisary to get to the target. If the target is an edge, it moves to the free cell and makes `atk` the occupied cell
 # Turns multiple moves in the same direction into one
 def CalcAnimMove(origPos, movTar):
-    if type(movTar[0]) == float:
+    if movTar[0] % 1 == .5:
         movTars = [(int(movTar[0]-.5), movTar[1]), (int(movTar[0]+.5), movTar[1])]
-    elif type(movTar[1]) == float:
+    elif movTar[1] % 1 == .5:
         movTars = [(movTar[0], int(movTar[1]-.5)), (movTar[0], int(movTar[1]+.5))]
     else:
         movTars = [movTar]
@@ -256,12 +256,24 @@ state = Board()
 state.AddNewHandle()
 state.FromInitStr(InitStrFromSetup(boardstr))
 
-state.ApplyMove(1 << 1 | 37 << 9)
+state.ApplyMove(1 << 1 | 46 << 9)
+#state.ApplyMove(47 << 1 | 47 << 9)
 #state.ApplyMove(2 << 1 | 2 << 9)
 state.PullState()
 print('Moved')
 moves = []
-moves = ZigGenMoves(state.handle, 38)
+moves = ZigGenMoves(state.handle, 47)
+moveInfo = []
+for move in moves:
+    pos = list(divmod(move['dest'], 9))[::-1]
+    rp = tarsqr
+    if move['doAtk']:
+        rp = (vatktar, hatktar)[move['atkDir'] % 2]
+        pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
+        pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
+    dc = move['doRet']
+    orig = list(divmod(move['orig'], 9))[::-1]
+    moveInfo.append((pos[:], rp, (dc, orig[:], pos[:]), move))
 
 pieces, deco, board = state.RegenRender()
 
@@ -271,12 +283,31 @@ pieces, deco, board = state.RegenRender()
 screen = pygame.display.set_mode([screenwidth, screenheight])
 clock = pygame.time.Clock()
 
+#gAnimQueue = SetupAnimMove(False, (2, 5), (3, 5.5))
+
 run = True
 while run:
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()
             run = False
+        if not gIsAnimating and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            mpos = [(event.pos[0]-latoff-40)/80, (event.pos[1]-veroff-40)/80]
+            mposc = [round(x) for x in mpos]
+            mposf = [round(2*x)/2 for x in mpos]
+            for pos, rp, rend, move in moveInfo:
+                if mposf == pos:
+                    #print('f', move)
+                    break
+                if mposc == pos:
+                    #print('c', move)
+                    break
+            else:
+                continue
+            print(move)
+            print(rend[0], tuple(rend[1]), tuple(rend[2]))
+            gAnimQueue = SetupAnimMove(rend[0], tuple(rend[1]), tuple(rend[2]))
+            moveInfo = []
     if not run: break
 
     for col in range(9):
@@ -302,16 +333,17 @@ while run:
     for piece, pos in deco:
         DrawPiece(psprites[piece], *pos)
 
-    for move in moves:
-        #print(move)
-        pos = list(divmod(move['dest'], 9))[::-1]
-        if move['doAtk']:
-            pos[1] += (1, 0, -1, 0, 1, -1, -1, 1)[move['atkDir']]/2
-            pos[0] += (0, 1, 0, -1, 1, 1, -1, -1)[move['atkDir']]/2
-        #if move['doCap']:
-        #    pos[1] += (1, 0, -1, 0, 1, -1, -1, 1)[move['atkDir']]
-        #    pos[0] += (0, 1, 0, -1, 1, 1, -1, -1)[move['atkDir']]
-        DrawPiece(tarsqr, *pos)
+    # for move in moves:
+    #     #print(move)
+    #     pos = list(divmod(move['dest'], 9))[::-1]
+    #     rp = tarsqr
+    #     if move['doAtk']:
+    #         rp = (vatktar, hatktar)[move['atkDir'] % 2]
+    #         pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
+    #         pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
+    #     DrawPiece(rp, *pos)
+    for pos, rp, _, _ in moveInfo:
+        DrawPiece(rp, *pos)
 
     #DrawPiece(vlock, *(3.5, 0))
     #DrawPiece(vatktar, *(3.5, 0))

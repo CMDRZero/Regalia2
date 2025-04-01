@@ -142,7 +142,7 @@ class Board:
                     color = 'wb'[cCell.color]
                     kind = 'icak'[cCell.piece]
                     pos = (col, row)
-                    pieces.append((color+kind, pos, cCell.regalia))
+                    pieces.append([color+kind, pos, cCell.regalia])
                     board[pos] = color+kind
                     coml = cCell.comLocks
                     for i, e in enumerate([1, 2]):
