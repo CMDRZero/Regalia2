@@ -1,0 +1,7 @@
+Move (~doCap & ~doAtk) orig -> dest
+  Swp (color(dest) == color(orig)) orig <-> dest
+  Train (orig == dest) add Reg
+  Sac
+Atk (~doCap & doAtk) orig -> dest + atkDir
+Cap (doCap & ~doAtk) orig -> dest
+  KCap (kAtk) orig -> dest + atkDir (drop King Reg)

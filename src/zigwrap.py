@@ -32,7 +32,7 @@ def ZigGenMoves(ptr: PyPtr, pos: u8) -> list[int]:
     for i in range(100):
         if (retptr[i] >> 1 % (1 << 7)) == 127:
             break
-        res.append(DecodeMove(retptr[i]))
+        res.append([DecodeMove(retptr[i]), retptr[i]])
     return res
 
 _enginelib.PyNewBoardHandle.argtypes = ()
@@ -60,7 +60,7 @@ def ZigGenInitStr(ptr: PyPtr) -> str:
     return ''.join([chr(x) for x in buf.contents])
 
 
-_enginelib.PyBoardApplyMove.argtypes = (PyPtr, u16)
+_enginelib.PyBoardApplyMove.argtypes = (PyPtr, u32)
 _enginelib.PyBoardApplyMove.restype = void
 #@AutoAnnot
 def ZigBoardApplyMove(ptr, move) -> None:
@@ -111,6 +111,7 @@ class Board:
         self.LocFromInitStr(initstr)
 
     def ApplyMove(self, move):
+        print(f'Apply move {move}')
         ZigBoardApplyMove(self.handle, move)
         #self.PullState() #Theoretically not needed
 

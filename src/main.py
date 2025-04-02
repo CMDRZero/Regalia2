@@ -209,6 +209,22 @@ def InitStrFromSetup(board: str) -> str:
     initstr += 'z'*81
     return initstr
 
+def UpdatePotMoves(pos: int) -> list:
+    moves = []
+    moveInfo = []
+    moves = ZigGenMoves(state.handle, pos)
+    for move, zm in moves:
+        pos = list(divmod(move['dest'], 9))[::-1]
+        rp = tarsqr
+        if move['doAtk']:
+            rp = (vatktar, hatktar)[move['atkDir'] % 2]
+            pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
+            pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
+        dc = move['doRet']
+        orig = list(divmod(move['orig'], 9))[::-1]
+        moveInfo.append((pos[:], rp, (dc, orig[:], pos[:]), move, zm))
+    return moveInfo
+
 light_cell = pygame.image.load("src/sprites/light_cell.png")
 dark_cell = pygame.image.load("src/sprites/dark_cell.png")
 regalia = pygame.image.load("src/sprites/crown.png")
@@ -256,24 +272,14 @@ state = Board()
 state.AddNewHandle()
 state.FromInitStr(InitStrFromSetup(boardstr))
 
-state.ApplyMove(1 << 1 | 46 << 9)
+#state.ApplyMove(1 << 1 | 46 << 9)
+#state.ApplyMove(2 << 1 | 2 << 9)
 #state.ApplyMove(47 << 1 | 47 << 9)
 #state.ApplyMove(2 << 1 | 2 << 9)
 state.PullState()
 print('Moved')
-moves = []
-moves = ZigGenMoves(state.handle, 47)
+
 moveInfo = []
-for move in moves:
-    pos = list(divmod(move['dest'], 9))[::-1]
-    rp = tarsqr
-    if move['doAtk']:
-        rp = (vatktar, hatktar)[move['atkDir'] % 2]
-        pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
-        pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
-    dc = move['doRet']
-    orig = list(divmod(move['orig'], 9))[::-1]
-    moveInfo.append((pos[:], rp, (dc, orig[:], pos[:]), move))
 
 pieces, deco, board = state.RegenRender()
 
@@ -295,19 +301,27 @@ while run:
             mpos = [(event.pos[0]-latoff-40)/80, (event.pos[1]-veroff-40)/80]
             mposc = [round(x) for x in mpos]
             mposf = [round(2*x)/2 for x in mpos]
-            for pos, rp, rend, move in moveInfo:
-                if mposf == pos:
-                    #print('f', move)
-                    break
-                if mposc == pos:
-                    #print('c', move)
-                    break
+            if moveInfo == []:
+                moveInfo = UpdatePotMoves(9*mposc[1] + mposc[0])
             else:
-                continue
-            print(move)
-            print(rend[0], tuple(rend[1]), tuple(rend[2]))
-            gAnimQueue = SetupAnimMove(rend[0], tuple(rend[1]), tuple(rend[2]))
-            moveInfo = []
+                for pos, rp, rend, move, zm in moveInfo:
+                    if mposf == pos:
+                        #print('f', move)
+                        break
+                    if mposc == pos:
+                        #print('c', move)
+                        break
+                else:
+                    moveInfo = []
+                    continue
+                print(zm, move)
+                print(rend[0], tuple(rend[1]), tuple(rend[2]))
+                #gAnimQueue = SetupAnimMove(rend[0], tuple(rend[1]), tuple(rend[2]))
+                state.ApplyMove(zm)
+                #state.ApplyMove(0xAAAAAAAA)
+                state.PullState()
+                pieces, deco, board = state.RegenRender()
+                moveInfo = []
     if not run: break
 
     for col in range(9):
@@ -342,7 +356,7 @@ while run:
     #         pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
     #         pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
     #     DrawPiece(rp, *pos)
-    for pos, rp, _, _ in moveInfo:
+    for pos, rp, _, _, _ in moveInfo:
         DrawPiece(rp, *pos)
 
     #DrawPiece(vlock, *(3.5, 0))
