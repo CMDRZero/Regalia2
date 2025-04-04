@@ -30,7 +30,7 @@ def ZigGenMoves(ptr: PyPtr, pos: u8) -> list[int]:
     retptr = _enginelib.PyGenMoves(ptr, pos)
     res = []
     for i in range(100):
-        if (retptr[i] >> 1 % (1 << 7)) == 127:
+        if (retptr[i] >> 0 % (1 << 3)) == 0:
             break
         res.append([DecodeMove(retptr[i]), retptr[i]])
     return res
@@ -68,13 +68,29 @@ def ZigBoardApplyMove(ptr, move) -> None:
 
 def DecodeMove(move: int) -> int:
     ret = {}
-    ret['orig'] = (move >> 1) % (1<<7)
-    ret['dest'] = (move >> 9) % (1<<7)
-    ret['doRet'] = (move >> 0) % (1<<1)
-    ret['doCap'] = (move >> 8) % (1<<1)
-    ret['doAtk'] = (move >> 16) % (1<<1)
-    if ret['doAtk'] or ret['doCap']:
-        ret['atkDir'] = (move >> 17) % (1<<3)
+    args = {
+        'kind': 3,
+        'orig': 7,
+        'dest': 7,
+        'atkDir': 2,
+        'doRet': 1,
+        'capPiece': 2 ,
+        'capReg': 1,
+        'origLock': 4,
+        'destLock': 4,}
+    vs = list(args.values())
+    vs = [(list(args.keys())[i], sum(vs[:i]), sum(vs[:1+i])) for i in range(len(vs))]
+
+    for v, l, u in vs:
+        ret[v] = (move>>l) % (1<<(u-l))
+
+    # ret['orig'] = (move >> 1) % (1<<7)
+    # ret['dest'] = (move >> 9) % (1<<7)
+    # ret['doRet'] = (move >> 0) % (1<<1)
+    # ret['doCap'] = (move >> 8) % (1<<1)
+    # ret['doAtk'] = (move >> 16) % (1<<1)
+    # if ret['doAtk'] or ret['doCap']:
+    #     ret['atkDir'] = (move >> 17) % (1<<3)
     return ret
 
 

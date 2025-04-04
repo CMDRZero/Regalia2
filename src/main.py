@@ -216,12 +216,13 @@ def UpdatePotMoves(pos: int) -> list:
     for move, zm in moves:
         pos = list(divmod(move['dest'], 9))[::-1]
         rp = tarsqr
-        if move['doAtk']:
+        if move['kind'] in [2, 6]:
             rp = (vatktar, hatktar)[move['atkDir'] % 2]
             pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
             pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
         dc = move['doRet']
         orig = list(divmod(move['orig'], 9))[::-1]
+        print(zm, move)
         moveInfo.append((pos[:], rp, (dc, orig[:], pos[:]), move, zm))
     return moveInfo
 
@@ -302,7 +303,8 @@ while run:
             mposc = [round(x) for x in mpos]
             mposf = [round(2*x)/2 for x in mpos]
             if moveInfo == []:
-                moveInfo = UpdatePotMoves(9*mposc[1] + mposc[0])
+                if tuple(mposc) in board:
+                    moveInfo = UpdatePotMoves(9*mposc[1] + mposc[0])
             else:
                 for pos, rp, rend, move, zm in moveInfo:
                     if mposf == pos:
