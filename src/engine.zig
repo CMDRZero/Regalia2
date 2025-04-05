@@ -15,7 +15,13 @@ const ARTDIAGMOVE: bool = false;
 
 ///////////////////////////////////////////////////////////////////////////
 
-const BitBoard = u81;
+//Speed to generate all moves is ~1.38 ms for 128 bit boards (with ReleaseFast and no Validation)
+//Speed for 81 bit boards is ~1.48 - 1.73 ms
+//Between a 6 and 20% speed up.
+//Might have to investigate
+//Still returns correct amount of moves
+
+pub const BitBoard = u81;
 const Connection = u4; //{-y}{-x}{+y}{+x}
 const Vec = std.ArrayList;
 
@@ -542,8 +548,9 @@ inline fn BlockersForColor(self: Board, color: u1) BitBoard {
     return self.pieces[4 * @as(u4, color) + 0] | self.pieces[4 * @as(u4, color) + 1] | self.pieces[4 * @as(u4, color) + 2] | self.pieces[4 * @as(u4, color) + 3];
 }
 
-inline fn LogHSB(val: u81) u7 {
-    return @intCast(80 - @clz(val));
+inline fn LogHSB(val: BitBoard) u7 {
+    const bitSize = @bitSizeOf(BitBoard);
+    return @intCast((bitSize - 1) - @clz(val));
 }
 test "LogHSB" {
     try AssertEql(LogHSB(ONE << 17), 17);
