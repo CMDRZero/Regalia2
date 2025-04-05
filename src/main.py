@@ -273,6 +273,9 @@ state = Board()
 state.AddNewHandle()
 state.FromInitStr(InitStrFromSetup(boardstr))
 
+#ZigGenAllMoves(state.handle, 1)
+print("Computed move is :", ZigCompMove(state.handle))
+
 #state.ApplyMove(1 << 1 | 46 << 9)
 #state.ApplyMove(2 << 1 | 2 << 9)
 #state.ApplyMove(47 << 1 | 47 << 9)
@@ -294,6 +297,7 @@ clock = pygame.time.Clock()
 
 run = True
 while run:
+    #print("Playout is:", ZigPlayOutBoard(state.handle))
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             pygame.quit()

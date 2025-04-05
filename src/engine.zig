@@ -1,12 +1,13 @@
 const std = @import("std");
 const MoveLib = @import("moves.zig");
-var gAllocator: std.mem.Allocator = undefined;
+pub var gAllocator: std.mem.Allocator = undefined;
 var gGpa: std.heap.DebugAllocator(.{}) = undefined;
 const AssertEql = @import("std").testing.expectEqual;
+const Bot = @import("bot.zig");
 
 ///////////////////////////////////////////////////////////////////////////
 
-const DoValidation: bool = true;
+const DoValidation: bool = false;
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -39,7 +40,7 @@ const ANULLMOVE = Move{ .kind = .null, .orig = 0, .dest = 0 };
 
 ///////////////////////////////////////////////////////////////////////////
 
-const MoveKind = enum(u3) {
+pub const MoveKind = enum(u3) {
     null = 0,
     move = 1,
     attack = 2,
@@ -50,7 +51,7 @@ const MoveKind = enum(u3) {
     sacrifice = 7,
 };
 
-const Move = packed struct(u32) {
+pub const Move = packed struct(u32) {
     kind: MoveKind,
     orig: u7,
     dest: u7,
@@ -63,13 +64,20 @@ const Move = packed struct(u32) {
     _: u1 = 0,
 };
 
-const Board = struct {
+pub const Board = struct {
     const Self = @This();
 
     regalia: BitBoard,
     combatLocks: [81]Connection,
     pieces: [8]BitBoard, //{color}{pieceID}2 //00 -> Inf, 01 -> Cav, 10 -> Art, 11 -> Kng //Color: 0 -> white, 1 -> black
     toPlay: u1 = WHITE,
+
+    pub fn WinVal(self: Self) i2 {
+        const whiteHasKing: i2 = @intCast(@popCount(self.pieces[3]));
+        const blackHasKing: i2 = @intCast(@popCount(self.pieces[7]));
+        
+        return whiteHasKing - blackHasKing;
+    }
 
     fn InitFromStr(self: *Self, initStr: [162]u8) void {
         //std.debug.print("Got initstr {s}\n", .{initStr});
@@ -106,10 +114,10 @@ const Board = struct {
         }
         for (0..81) |idx| {
             const coml = self.combatLocks[idx];
-            std.debug.print("{}", .{coml});
+            //std.debug.print("{}", .{coml});
             buf[idx + 81] = 'a' + @as(u8, coml);
         }
-        std.debug.print("\n", .{});
+        //std.debug.print("\n", .{});
     }
 
     fn PieceAt(self: Self, pos: u7) ?u3 {
@@ -168,6 +176,7 @@ const Board = struct {
     }
 
     fn _ValidateMove(self: Self, move: Move) !void {
+        errdefer std.debug.print("Errored move is {}\n", .{move});
         const moveKind: MoveKind = move.kind;
         if (moveKind == .null) return;
 
@@ -178,7 +187,7 @@ const Board = struct {
         _ = ownPiece;
 
         if (move.doRet != 0 and Bit(self.regalia, move.orig) == 0) return error.Does_not_have_Regalia_to_Retreat;
-        std.debug.print("combatlocks is {}\n", .{self.combatLocks[move.orig]});
+        //std.debug.print("combatlocks is {}\n", .{self.combatLocks[move.orig]});
         //if (self.combatLocks[move.orig] != 0 and (move.doRet | move.doCap)==0) return error.Escape_From_Combat_Without_Retreat_nor_Capture;
 
         const destPiece = self.PieceAt(move.dest);
@@ -219,17 +228,17 @@ const Board = struct {
 
     ///Will update the move to contain accurate information about how to undo the move
     fn ApplyMove(self: *Self, move: *Move) void {
-        std.debug.print("Got move orig: {}\n", .{move.orig});
-        std.debug.print("Got move dest: {}\n", .{move.dest});
+        //std.debug.print("Got move orig: {}\n", .{move.orig});
+        //std.debug.print("Got move dest: {}\n", .{move.dest});
 
         ValidateMove(self.*, move.*);
 
         const moveKind: MoveKind = move.kind;
-        std.debug.print("Got movekind : {}\n", .{moveKind});
+        //std.debug.print("Got movekind : {}\n", .{moveKind});
         if (moveKind == .null) return;
 
         const ownPiece = self.PieceAt(move.orig).?; //Checked by validate
-        std.debug.print("Got self\n", .{});
+        //std.debug.print("Got self\n", .{});
         if (move.doRet != 0) {
             self._RemoveRegalia(move.orig);
             self._RemoveOrigLocks(move);
@@ -251,7 +260,7 @@ const Board = struct {
                 self._MovePiece(move.orig, move.dest, ownPiece);
             },
             .train => {
-                std.debug.print("Train begin\n", .{});
+                //std.debug.print("Train begin\n", .{});
                 self._AddRegalia(move.orig);
             },
             .swap => {
@@ -268,8 +277,16 @@ const Board = struct {
             },
             else => unreachable,
         }
-        std.debug.print("Validate begin\n", .{});
+        //std.debug.print("Validate begin\n", .{});
         self.Validate();
+    }
+
+    pub fn ApplyDoubleMove(self: *Self, moves: [2]Move) void {
+        var tmov = moves[0];
+        self.ApplyMove(&tmov);
+        tmov = moves[1];
+        self.ApplyMove(&tmov);
+        self.toPlay = ~self.toPlay;
     }
 
     inline fn _RemoveOrigLocks(self: *Self, move: *Move) void {
@@ -327,13 +344,13 @@ const Board = struct {
         var array = Vec(Move).init(gAllocator);
         if (DoValidation and self.PieceAt(pos) == null) return error.Cannot_Generate_Moves_for_Null;
         const pieceAt = self.PieceAt(pos).?;
-        std.debug.print("NoNullPiece\n", .{});
+        //std.debug.print("NoNullPiece\n", .{});
         const color: u1 = @intCast(pieceAt >> 2);
         const piece: u2 = @intCast(pieceAt % 4);
         try self.GenerateMovesFor(&array, color, pos, piece);
-        std.debug.print("Length of array is {}\n", .{array.items.len});
+        //std.debug.print("Length of array is {}\n", .{array.items.len});
         const sso = (try array.toOwnedSliceSentinel(ANULLMOVE));
-        std.debug.print("Length of moves is {}\n", .{sso.len});
+        //std.debug.print("Length of moves is {}\n", .{sso.len});
         return @intFromPtr(sso.ptr);
     }
 
@@ -356,7 +373,7 @@ const Board = struct {
 
         const spd = MOVSPD[piece];
         const ownpow = self.PowerAt(pos);
-        std.debug.print("Got own pow\n", .{});
+        //std.debug.print("Got own pow\n", .{});
 
         const rawmoves = MoveLib.MoveMap(pos, blockers, spd) | ONE << pos;
         const capmap = MoveLib.CaptureConvolve(rawmoves, piece);
@@ -366,8 +383,8 @@ const Board = struct {
         var _capable: BitBoard = 0;
         var _atkable: BitBoard = 0;
         var _kingCap: u7 = 127;
-        std.debug.print("Pre enemy pow\n", .{});
-        std.debug.print("Enemy map is {b:0>81}, threatens: {b:0>81}\n", .{ enemies, threatened });
+        //std.debug.print("Pre enemy pow\n", .{});
+        //std.debug.print("Enemy map is {b:0>81}, threatens: {b:0>81}\n", .{ enemies, threatened });
 
         while (threatened != 0) {
             const dest: u7 = LogHSB(threatened);
@@ -376,7 +393,7 @@ const Board = struct {
             if (self.AttackersOn(dest) + tpow > self.PowerAt(dest)) {
                 if (dest == enemKing and Bit(self.regalia, enemKing) == 1) {
                     _kingCap = dest;
-                    std.debug.print("Enemy king capture possible!\n", .{});
+                    //std.debug.print("Enemy king capture possible!\n", .{});
                 } else {
                     _capable |= ONE << dest;
                 }
@@ -400,7 +417,7 @@ const Board = struct {
         }
 
         if (!stuck) {
-            std.debug.print("Not stuck\n", .{});
+            //std.debug.print("Not stuck\n", .{});
 
             //Combat Swap
             if (piece == 0 and ownRegalia == 1){
@@ -456,7 +473,69 @@ const Board = struct {
             try array.append(Move{ .kind = .sacrifice, .orig = pos, .dest = pos});
         }
     }
+
+    fn GenerateAllColorSingleMoves(self: Self, array: *Vec(Move), color: u1) !void {
+        for ([_]u2{2, 3, 1, 0}) |piece| {
+            var pieces = self.pieces[4*@as(u4, color) + piece];
+            while (pieces != 0){
+                const pos: u7 = LogHSB(pieces);
+                pieces ^= ONE << pos;
+
+                if (self.PieceAt(pos) == null) std.debug.panic("Ahhh, pos is {}\n", .{pos});
+                try self.GenerateMovesFor(array, color, pos, piece);
+            }
+        }
+    }
+
+    pub fn GenerateAllColorMoves(self: *Self, array: *Vec([2]Move), color: u1) !void {
+        var singlemoves = Vec(Move).init(gAllocator);
+        var secmoves = Vec(Move).init(gAllocator);
+        try self.GenerateAllColorSingleMoves(&singlemoves, color);
+        for (singlemoves.items) |_initmove| {
+            var initmove = _initmove;
+            
+            //_ = &initmove;
+
+            const copy = self.*;
+            defer self.* = copy;
+            
+            self.ApplyMove(&initmove);
+            
+            //defer self.UnApplyMove(initmove);
+            
+            secmoves.clearAndFree();
+            try self.GenerateAllColorSingleMoves(&secmoves, color);
+            for (secmoves.items) |secmove| {
+                if (secmove.orig != initmove.dest) 
+                    try array.append([2]Move{initmove, secmove});
+            }
+            try array.append([2]Move{initmove, ANULLMOVE});
+        }
+    }
+
+    pub fn GenerateRandomMove(self: *Self, rand: *std.Random, color: u1) ![2]Move {
+        var singlemoves = Vec(Move).init(gAllocator);
+        try self.GenerateAllColorSingleMoves(&singlemoves, color);
+        const firstidx = rand.uintLessThanBiased(u32, @intCast(singlemoves.items.len));
+        const _initmove = singlemoves.items[firstidx];
+
+
+        var secmoves = Vec(Move).init(gAllocator);
+        var initmove = _initmove;
+
+        const copy = self.*;
+        defer self.* = copy;
+        
+        self.ApplyMove(&initmove);
+
+        try self.GenerateAllColorSingleMoves(&secmoves, color);
+        const secidx = rand.uintLessThanBiased(u32, @intCast(secmoves.items.len));
+        const secmove = singlemoves.items[secidx];
+
+        return [2]Move{_initmove, secmove};
+    }
 };
+
 ///////////////////////////////////////////////////////////////////////////
 
 inline fn BlockersForColor(self: Board, color: u1) BitBoard {
@@ -550,6 +629,7 @@ export fn PyInitAlloc() void {
     gGpa = std.heap.GeneralPurposeAllocator(.{}).init;
     gAllocator = gGpa.allocator();
     MoveLib.Init();
+    Bot.Init();
 }
 
 export fn PyNewBoardHandle() PYPTR {
@@ -567,9 +647,19 @@ export fn PyInitBoardFromStr(ptr: PYPTR, str: [*c]u8) void {
 }
 
 export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
-    //std.debug.print("Alignment is {}\n", .{@alignOf(Board)});
     const bptr: *Board = ImportPtr(ptr);
     return bptr.StandAloneGenMovesFor(@intCast(pos)) catch unreachable;
+}
+
+export fn PyGenAllMoves(ptr: PYPTR, color: u8) PYPTR {
+    const bptr: *Board = ImportPtr(ptr);
+    var array = Vec([2]Move).init(gAllocator);
+    var timer = std.time.Timer.start() catch unreachable;
+    bptr.GenerateAllColorMoves(&array, @intCast(color)) catch unreachable;
+    const passed = timer.read();
+    std.debug.print("Total double moves is: {}\n", .{array.items.len});
+    std.debug.print("Time took was {d:.3}ms\n", .{@as(f64, @floatFromInt(passed))/1_000_000});
+    return @intFromPtr(array.items.ptr);
 }
 
 export fn PyGenInitStr(ptr: PYPTR, buf: PYPTR) void {
@@ -581,6 +671,23 @@ export fn PyGenInitStr(ptr: PYPTR, buf: PYPTR) void {
 export fn PyBoardApplyMove(ptr: PYPTR, mov: u32) void {
     var move: Move = @bitCast(mov);
     ImportPtr(ptr).ApplyMove(&move);
+}
+
+export fn PyPlayOutBoard(ptr: PYPTR) i8 {
+    var timer = std.time.Timer.start() catch unreachable;
+    const ret = Bot.PlayOutGame(ImportPtr(ptr).*);
+    const passed = timer.read();
+    std.debug.print("Time took was {d:.3}ms\n", .{@as(f64, @floatFromInt(passed))/1_000_000});
+    return ret;
+}
+
+export fn PyCompMove(ptr: PYPTR) u64 {
+    std.debug.print("Thinking...\n", .{});
+    var timer = std.time.Timer.start() catch unreachable;
+    const ret = Bot.CompMove(ImportPtr(ptr).*);
+    const passed = timer.read();
+    std.debug.print("Time took to decide move was {d:.3}ms\n", .{@as(f64, @floatFromInt(passed))/1_000_000});
+    return @as(u64, @as(u32, @bitCast(ret[0]))) << 32 | @as(u64, @as(u32, @bitCast(ret[1])));
 }
 
 ///////////////////////////////////////////////////////////////////////////

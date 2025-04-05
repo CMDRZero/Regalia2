@@ -29,11 +29,26 @@ _enginelib.PyGenMoves.restype = POINTER(u32)
 def ZigGenMoves(ptr: PyPtr, pos: u8) -> list[int]:
     retptr = _enginelib.PyGenMoves(ptr, pos)
     res = []
-    for i in range(100):
+    for i in range(10_000):
         if (retptr[i] >> 0 % (1 << 3)) == 0:
             break
         res.append([DecodeMove(retptr[i]), retptr[i]])
     return res
+
+_enginelib.PyGenAllMoves.argtypes = (PyPtr, u8)
+_enginelib.PyGenAllMoves.restype = POINTER(u64)
+#@AutoAnnot
+def ZigGenAllMoves(ptr: PyPtr, pos: u8) -> list[int]:
+    retptr = _enginelib.PyGenAllMoves(ptr, pos)
+    res = []
+    for i in range(10_000):
+        item = retptr[i]
+        if (item >> 0 % (1 << 3)) == 0:
+            break
+        res.append([DecodeMove(item), item])
+    return res
+
+
 
 _enginelib.PyNewBoardHandle.argtypes = ()
 _enginelib.PyNewBoardHandle.restype = PyPtr
@@ -65,6 +80,18 @@ _enginelib.PyBoardApplyMove.restype = void
 #@AutoAnnot
 def ZigBoardApplyMove(ptr, move) -> None:
     _enginelib.PyBoardApplyMove(ptr, move)
+
+_enginelib.PyPlayOutBoard.argtypes = (PyPtr,)
+_enginelib.PyPlayOutBoard.restype = i8
+#@AutoAnnot
+def ZigPlayOutBoard(ptr) -> int:
+    return _enginelib.PyPlayOutBoard(ptr)
+
+_enginelib.PyCompMove.argtypes = (PyPtr,)
+_enginelib.PyCompMove.restype = u64
+#@AutoAnnot
+def ZigCompMove(ptr) -> int:
+    return _enginelib.PyCompMove(ptr)
 
 def DecodeMove(move: int) -> int:
     ret = {}
