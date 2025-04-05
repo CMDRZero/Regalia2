@@ -625,14 +625,14 @@ fn ImportPtr(ptr: PYPTR) *Board {
     return @as(*Board, @ptrFromInt(ptr));
 }
 
-export fn PyInitAlloc() void {
+pub export fn PyInitAlloc() void {
     gGpa = std.heap.GeneralPurposeAllocator(.{}).init;
     gAllocator = gGpa.allocator();
     MoveLib.Init();
     Bot.Init();
 }
 
-export fn PyNewBoardHandle() PYPTR {
+pub export fn PyNewBoardHandle() PYPTR {
     const handle = _NewBoardHandle() catch unreachable;
     //std.debug.print("Exporting {*} as {x}\n", .{handle, ExportPtr(handle)});
     return ExportPtr(handle);
@@ -642,16 +642,16 @@ fn _NewBoardHandle() !*Board {
     return boardPtr;
 }
 
-export fn PyInitBoardFromStr(ptr: PYPTR, str: [*c]u8) void {
+pub export fn PyInitBoardFromStr(ptr: PYPTR, str: [*c]u8) void {
     ImportPtr(ptr).InitFromStr(str[0..162].*);
 }
 
-export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
+pub export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
     const bptr: *Board = ImportPtr(ptr);
     return bptr.StandAloneGenMovesFor(@intCast(pos)) catch unreachable;
 }
 
-export fn PyGenAllMoves(ptr: PYPTR, color: u8) PYPTR {
+pub export fn PyGenAllMoves(ptr: PYPTR, color: u8) PYPTR {
     const bptr: *Board = ImportPtr(ptr);
     var array = Vec([2]Move).init(gAllocator);
     var timer = std.time.Timer.start() catch unreachable;
@@ -662,18 +662,18 @@ export fn PyGenAllMoves(ptr: PYPTR, color: u8) PYPTR {
     return @intFromPtr(array.items.ptr);
 }
 
-export fn PyGenInitStr(ptr: PYPTR, buf: PYPTR) void {
+pub export fn PyGenInitStr(ptr: PYPTR, buf: PYPTR) void {
     const bptr: *Board = ImportPtr(ptr);
     const sbuf: *[162]u8 = @ptrFromInt(buf);
     bptr.GenInitStr(sbuf);
 }
 
-export fn PyBoardApplyMove(ptr: PYPTR, mov: u32) void {
+pub export fn PyBoardApplyMove(ptr: PYPTR, mov: u32) void {
     var move: Move = @bitCast(mov);
     ImportPtr(ptr).ApplyMove(&move);
 }
 
-export fn PyPlayOutBoard(ptr: PYPTR) i8 {
+pub export fn PyPlayOutBoard(ptr: PYPTR) i8 {
     var timer = std.time.Timer.start() catch unreachable;
     const ret = Bot.PlayOutGame(ImportPtr(ptr).*);
     const passed = timer.read();
@@ -681,7 +681,7 @@ export fn PyPlayOutBoard(ptr: PYPTR) i8 {
     return ret;
 }
 
-export fn PyCompMove(ptr: PYPTR) u64 {
+pub export fn PyCompMove(ptr: PYPTR) u64 {
     std.debug.print("Thinking...\n", .{});
     var timer = std.time.Timer.start() catch unreachable;
     const ret = Bot.CompMove(ImportPtr(ptr).*);
