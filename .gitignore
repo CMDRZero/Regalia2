@@ -4,3 +4,9 @@
 *.pdb
 *.so
 *.pyc
+perf/*
+out.*
+perf.*
+*.o
+*.zip
+*.exe

@@ -27,7 +27,19 @@
         {
             "label": "Build zig file",
             "type": "shell",
-            "command": "zig.exe build-lib -O ReleaseFast -dynamic ${relativeFile} && del ${fileBasenameNoExtension}.pdb && del ${fileBasenameNoExtension}.lib && del ${fileBasenameNoExtension}.dll.obj",
+            "command": "zig.exe build-lib -O ReleaseFast -dynamic ${relativeFile} && del ${fileBasenameNoExtension}.lib && del ${fileBasenameNoExtension}.dll.obj",
+            "group": {
+              "kind": "build",
+            },
+            "presentation": {
+                "reveal": "always",
+                "panel": "new",
+            }
+        },
+        {
+            "label": "Build fast and perf zig file",
+            "type": "shell",
+            "command": "zig.exe build-exe -O ReleaseFast ${relativeFile} && zig.exe build-exe src/tester.zig -O Debug -target x86_64-linux",
             "group": {
               "kind": "build",
               "isDefault": true
