@@ -3,11 +3,10 @@ const MoveLib = @import("moves.zig");
 pub var gAllocator: std.mem.Allocator = undefined;
 var gGpa: std.heap.DebugAllocator(.{}) = undefined;
 const AssertEql = @import("std").testing.expectEqual;
-const Bot = @import("vinebot.zig");
 
 ///////////////////////////////////////////////////////////////////////////
 
-const DoValidation: bool = false;
+const DoValidation: bool = true;
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -15,34 +14,44 @@ const ARTDIAGMOVE: bool = false;
 
 ///////////////////////////////////////////////////////////////////////////
 
-//Speed to generate all moves is ~1.38 ms for 128 bit boards (with ReleaseFast and no Validation)
-//Speed for 81 bit boards is ~1.48 - 1.73 ms
-//Between a 6 and 20% speed up.
-//Might have to investigate
-//Still returns correct amount of moves
-
 pub const BitBoard = u128;
-const Connection = u4; //{-y}{-x}{+y}{+x}
-const Vec = std.ArrayList;
+//const ArrayList = std.ArrayList;
 
 ///////////////////////////////////////////////////////////////////////////
 
-const ONE: BitBoard = 1;
+const BB_ONE: BitBoard = 1;
 
-const RIGHT: u4 = 0b0001; //+x
-const UP: u4 = 0b0010; //+y
-const LEFT: u4 = 0b0100; //-x
-const DOWN: u4 = 0b1000; //-y
+//Origin is bottom left
+const OH_RIGHT: u4 = 0b0001; //+x
+const OH_UP: u4 = 0b0010; //+y
+const OH_LEFT: u4 = 0b0100; //-x
+const OH_DOWN: u4 = 0b1000; //-y
 
-const WHITE: u1 = 0;
-const BLACK: u1 = 1;
+const SHR = 1;
+const SHU = 11;
+const SHL = -SHR;
+const SHD = -SHU;
 
-pub const ATKPOW = [4]u8{ 2, 4, 7, 2 };
-const MOVSPD = [4]u2{ 1, 2, 0, 0 }; //Move speed minus the attack
+const WHITE = 0;
+const BLACK = 1;
 
-const DIRS = [4]u4{ 1, 2, 4, 8 };
+pub const ATKPOW = [4] comptime_int { 2, 4, 7, 2, 
+                                                       3, 5, 8, 3};
+const MOVSPD = [4] comptime_int { 1, 2, 0, 0 }; //Move speed minus the attack
 
-const ANULLMOVE = Move{ .kind = .null, .orig = 127, .dest = 127 };
+const DIRS = [4]u4{ OH_RIGHT, OH_UP, OH_LEFT, OH_DOWN };
+
+const PLAYABLE = b: {
+    var bb: BitBoard = 0;
+    for(0..9) |x| for (0..9) |y| {
+        bb |= 1 << (11 * y + x);
+    };
+    break: b bb;
+};
+
+test {
+    if (PLAYABLE != 0x1ff3fe7fcff9ff3fe7fcff9ff) @compileError("Playable board generated wrong");
+}
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -57,127 +66,66 @@ pub const MoveKind = enum(u3) {
     sacrifice = 7,
 };
 
-pub const Move = packed struct(u32) {
+pub const Move = struct {
     kind: MoveKind,
     orig: u7,
     dest: u7,
-    atkDir: u2 = 0,
-    doRet: u1 = 0,
-    capPiece: u2 = 0,
-    capReg: u1 = 0,
-    origLock: u4 = 0, //Old Combat locks before clearing
-    destLock: u4 = 0, //Old Combat locks before clearing
-    _: u1 = 0,
+    atkdir: u2, //Undefined if kind does not attack
+    doRet: bool,
 };
+const SingleMoveBuffer = std.BoundedArray(Move, 128);
 
-pub const SingleMoveBuffer = struct {
-    const Self = @This();
-    const MaxMoves = 128; //Maximum moves a single piece can make, 128 is our conservative estimate but if it fails we'll know
-
-    buffer: *[MaxMoves] Move = undefined,
-    count: u7 = 0,
-
-    pub fn Init(self: *Self) !void {
-        self.buffer = try gAllocator.create([MaxMoves]Move);
-    }
-
-    pub fn DeInit(self: Self) void {
-        gAllocator.destroy(self.buffer);
-    }
-
-    pub fn Append(self: *Self, item: Move) void {
-        self.buffer[self.count] = item;
-        self.count += 1;
-    }
-
-    pub fn Clear(self: *Self) void {
-        self.count = 0;
-    }
-    
-    pub fn GetBuffer(self: Self) [] const Move {
-        return self.buffer[0..self.count];
-    }
+pub const FullMove = struct {
+    moves: [2]Move,
 };
+const FullMoveBuffer = std.BoundedArray(FullMove, 128*128);
 
-pub const DoubleMoveBuffer = struct {
-    const Self = @This();
-    const MaxMoves = 128*128; //Based on crude guess that we can up to 128 moves once and two moves gives the square
-
-    buffer: *[MaxMoves][2]Move = undefined,
-    count: u14 = 0,
-
-    pub fn Init(self: *Self) !void {
-        self.buffer = try gAllocator.create([MaxMoves][2]Move);
-    }
-
-    pub fn DeInit(self: Self) void {
-        gAllocator.destroy(self.buffer);
-    }
-
-    pub fn Append(self: *Self, item: [2]Move) void {
-        self.buffer[self.count] = item;
-        self.count += 1;
-        //std.debug.print("Count is {}\n", .{self.count});
-    }
-
-    pub fn Clear(self: *Self) void {
-        self.count = 0;
-    }
-    
-    pub fn GetBuffer(self: Self) [] const [2]Move {
-        return self.buffer[0..self.count];
-    }
-};
 
 pub const Board = struct {
     const Self = @This();
 
-    regalia: BitBoard,
-    combatLocks: [81]Connection,
-    pieces: [8]BitBoard, //{color}{pieceID}2 //00 -> Inf, 01 -> Cav, 10 -> Art, 11 -> Kng //Color: 0 -> white, 1 -> black
-    toPlay: u1 = WHITE,
-
-    pub fn WinVal(self: Self) i2 {
-        const whiteHasKing: i2 = @intCast(@popCount(self.pieces[3]));
-        const blackHasKing: i2 = @intCast(@popCount(self.pieces[7]));
-        
-        return whiteHasKing - blackHasKing;
-    }
+    lockright: BitBoard,
+    lockup: BitBoard,
+    pieces: [16] BitBoard, //{color}{pieceID}2 //00 -> Inf, 01 -> Cav, 10 -> Art, 11 -> Kng //Color: 0 -> white, 1 -> black
+    toPlay: u1,
 
     fn InitFromStr(self: *Self, initStr: [162]u8) void {
         //std.debug.print("Got initstr {s}\n", .{initStr});
-        self.regalia = 0;
-        self.combatLocks = [1]Connection{0} ** 81;
-        self.pieces = [1]BitBoard{0} ** 8;
+        self.locks = @splat(0);
+        self.pieces = @splat(0);
         for (0.., initStr[0..81]) |_idx, c| {
             if (c == 'z') continue;
+            const idx: u7 = 11 * (_idx / 9) + (_idx % 9);
+
             const val = c - 'a';
-            const idx: u7 = @intCast(_idx);
-            const pieceIdx = val % 8;
+            const pieceType = val % 4;
+            const pieceColor = (val / 4) & 1;
             const hasReg = (val / 8) & 1;
-            self.pieces[pieceIdx] |= ONE << idx;
-            self.regalia |= @as(BitBoard, hasReg) << idx;
+            self.pieces[pieceType | hasReg<<2 | pieceColor<<3] |= BB_ONE << idx;
         }
         for (0.., initStr[81..162]) |_idx, c| {
             if (c == 'z') continue;
-            const conn: u4 = @intCast(c - 'a');
-            const idx: u7 = @intCast(_idx);
-            self.combatLocks[idx] = conn;
+            const idx: u7 = 11 * (_idx / 9) + (_idx % 9);
+            self.locks[idx] = @intCast(c - 'a');
         }
         Validate(self);
     }
 
     fn GenInitStr(self: Self, buf: *[162]u8) void {
-        for (0..81) |idx| {
-            for (0..8) |piece| {
-                if (Has(self.pieces[piece], ONE << @intCast(idx))) {
-                    const hasReg: u8 = @intCast((self.regalia >> @intCast(idx)) & 1);
-                    buf[idx] = 'a' + @as(u8, @intCast(hasReg << 3 | piece));
+        for (0..81) |_idx| {
+            const idx = 11 * (_idx / 9) + (_idx % 9);
+            for (0..16) |piece| {
+                if (Has(self.pieces[piece], BB_ONE << @intCast(idx))) {
+                    //The fmt expects reg.color.type_type, but we are given color.reg.type_type :|
+                    const sendpiece: u8 = @intCast(((piece >> 2) & 1) << 3 | ((piece >> 3) & 1) << 2 | piece % 4);
+
+                    buf[idx] = 'a' + sendpiece;
                     break;
                 }
             } else buf[idx] = 'z';
         }
-        for (0..81) |idx| {
+        for (0..81) |_idx| {
+            const idx = 11 * (_idx / 9) + (_idx % 9);
             const coml = self.combatLocks[idx];
             //std.debug.print("{}", .{coml});
             buf[idx + 81] = 'a' + @as(u8, coml);
@@ -185,22 +133,30 @@ pub const Board = struct {
         //std.debug.print("\n", .{});
     }
 
-    fn PieceAt(self: Self, pos: u7) ?u3 {
-        for (0..8) |piece| {
-            if (Bit(self.pieces[piece], pos) != 0) return @intCast(piece);
-        } else return null;
+    fn PieceAt(self: Self, pos: u7) ?u4 {
+        for (0..16) |piece| 
+            if (Bit(self.pieces[piece], pos) != 0) 
+                return @intCast(piece);
+        return null;
     }
 
     fn PowerAt(self: Self, pos: u7) u8 {
         if (DoValidation and self.PieceAt(pos) == null) std.debug.panic("Self ({}) is null, cannot get power\n", .{pos});
-        return ATKPOW[self.PieceAt(pos).? % 4] + Bit(self.regalia, pos);
+        
+        const piece = self.PieceAt(pos).?;
+        return ATKPOW[piece % 8];
     }
 
     fn AttackersOn(self: Self, pos: u7) u8 {
         var sum: u8 = 0;
-        for (DIRS) |dir| if (Has(self.combatLocks[pos], dir)) {
-            sum += self.PowerAt(NewPos(pos, dir));
-        };
+        const right = Bit(self.lockright, pos);
+        const up = Bit(self.lockup, pos);
+        const left = Bit(self.lockright, pos + SHL);
+        const down = Bit(self.lockup, pos + SHD);
+        sum += right * self.PowerAt(pos + SHR);
+        sum += up * self.PowerAt(pos + SHU);
+        sum += left * self.PowerAt(pos + SHL);
+        sum += down * self.PowerAt(pos + SHD);
         return sum;
     }
 
@@ -209,33 +165,12 @@ pub const Board = struct {
     }
 
     fn _Validate(self: *Self) !void {
-        var haspiece: BitBoard = 0;
-        inline for (0..8) |idx| {
-            if (Has(haspiece, self.pieces[idx])) return error.Overlapping_Pieces;
-            haspiece |= self.pieces[idx];
-        }
-
-        for (0..9) |x| for (0..9) |y| {
-            const pos: u7 = @intCast(9 * y + x);
-            const conn = self.combatLocks[pos];
-            errdefer std.debug.print("x: {}, y: {}\n", .{ x, y });
-            if (x == 0 and Has(conn, LEFT)) return error.Invalid_Connection_Left;
-            if (x == 8 and Has(conn, RIGHT)) return error.Invalid_Connection_Right;
-            if (y == 0 and Has(conn, DOWN)) return error.Invalid_Connection_Down;
-            if (y == 8 and Has(conn, UP)) return error.Invalid_Connection_Up;
-
-            for ([_]u4{ 1, 2, 4, 8 }) |dir| if (Has(conn, dir)) {
-                const nPos = NewPos(pos, dir);
-                const nConn: u4 = self.combatLocks[nPos];
-                if (!Has(nConn, ConverseDir(dir))) return error.Asymetric_Connection;
-                if (Bit(haspiece, nPos) == 0) return error.Connection_to_Blank;
-            };
-
-            if (Implies(Bit(self.regalia, pos), Bit(haspiece, pos)) == 0) return error.Floating_Regalia;
-        };
+        _ = self;
+        return;
     }
 
-    ///Not exaughstive but should catch most cases
+    /// Not exaughstive but should catch most cases
+    /// TODO
     fn ValidateMove(self: Self, move: Move) void {
         if (DoValidation) self._ValidateMove(move) catch |err| std.debug.panic("Validation Failure: `{}`", .{err});
     }
@@ -243,17 +178,18 @@ pub const Board = struct {
     fn _ValidateMove(self: Self, move: Move) !void {
         errdefer std.debug.print("Errored move is {}\n", .{move});
         const moveKind: MoveKind = move.kind;
-        if (moveKind == .null) return;
+        if (moveKind == .null) return; //Always legal
 
-        if (move.dest > 81) return error.Destination_too_large;
-        if (move.orig > 81) return error.Origin_too_large;
+
+        if (move.orig % 11 > 8) return error.Orig_X_Too_Large;
+        if (move.orig / 11 > 8) return error.Orig_Y_Too_Large;
+        if (move.dest % 11 > 8) return error.Dest_X_Too_Large;
+        if (move.dest / 11 > 8) return error.Dest_Y_Too_Large;
+        
 
         const ownPiece = self.PieceAt(move.orig) orelse return error.No_Piece_At_Origin_of_Move;
         _ = ownPiece;
 
-        if (move.doRet != 0 and Bit(self.regalia, move.orig) == 0) return error.Does_not_have_Regalia_to_Retreat;
-        //std.debug.print("combatlocks is {}\n", .{self.combatLocks[move.orig]});
-        //if (self.combatLocks[move.orig] != 0 and (move.doRet | move.doCap)==0) return error.Escape_From_Combat_Without_Retreat_nor_Capture;
 
         const destPiece = self.PieceAt(move.dest);
         switch (moveKind) {
@@ -291,41 +227,36 @@ pub const Board = struct {
         }
     }
 
-    ///Will update the move to contain accurate information about how to undo the move
-    fn ApplyMove(self: *Self, move: *Move) void {
-        //std.debug.print("Got move orig: {}\n", .{move.orig});
-        //std.debug.print("Got move dest: {}\n", .{move.dest});
-
-        ValidateMove(self.*, move.*);
+    fn ApplyMove(self: *Self, move: Move) void {
+        ValidateMove(self.*, move);
 
         const moveKind: MoveKind = move.kind;
-        //std.debug.print("Got movekind : {}\n", .{moveKind});
         if (moveKind == .null) return;
 
         const ownPiece = self.PieceAt(move.orig).?; //Checked by validate
-        //std.debug.print("Got self\n", .{});
-        if (move.doRet != 0) {
+
+        if (move.doRet) {
             self._RemoveRegalia(move.orig);
-            self._RemoveOrigLocks(move);
+            self._RemoveLocksAt(move.orig);
         }
 
-        const destPiece = self.PieceAt(move.dest);
+        const destPiece = self.PieceAt(move.dest); //May be null, but if so is never used.
         switch (moveKind) {
             .capture => {
                 self._RemovePiece(move.dest, destPiece.?); //Checked by validate
                 self._MovePiece(move.orig, move.dest, ownPiece);
                 self._AddRegalia(move.dest);
-                self._RemoveDestLocks(move);
+                //Note to self, can optimize these former two into a single fused operation
+                self._RemoveLocksAt(move.dest);
             },
             .attack => {
                 self._MovePiece(move.orig, move.dest, ownPiece);
-                self._ToggleLockInDir(move.dest, @as(u4, 1) << @intCast(move.atkDir));
+                self._AddLockInDir(move.dest, move.atkdir);
             },
             .move => {
                 self._MovePiece(move.orig, move.dest, ownPiece);
             },
             .train => {
-                //std.debug.print("Train begin\n", .{});
                 self._AddRegalia(move.orig);
             },
             .swap => {
@@ -333,80 +264,71 @@ pub const Board = struct {
             },
             .kingweaken => {
                 self._MovePiece(move.orig, move.dest, ownPiece);
-                self._ToggleLockInDir(move.dest, @as(u4, 1) << move.atkDir);
-                self._RemoveRegalia(NewPos(move.dest, @as(u4, 1) << move.atkDir));
+                self._AddLockInDir(move.dest, move.atkDir);
+                self._RemoveRegalia(Offset(move.dest, move.atkDir));
             },
             .sacrifice => {
                 self._RemovePiece(move.dest, destPiece.?);
-                self._RemoveOrigLocks(move);
+                self._RemoveLocksAt(move.orig);
             },
             else => unreachable,
         }
-        //std.debug.print("Validate begin\n", .{});
         self.Validate();
     }
 
-    pub fn ApplyDoubleMove(self: *Self, moves: [2]Move) void {
-        var tmov = moves[0];
-        self.ApplyMove(&tmov);
-        tmov = moves[1];
-        self.ApplyMove(&tmov);
+    pub fn ApplyFullMove(self: *Self, move: FullMove) void {
+        self.ApplyMove(move.moves[0]);
+        self.ApplyMove(move.moves[1]);
         self.toPlay = ~self.toPlay;
     }
 
-    fn _RemoveOrigLocks(self: *Self, move: *Move) void {
-        const oldLocks = self.combatLocks[move.orig];
-        move.origLock = oldLocks;
-        for (DIRS) |dir| if (Has(oldLocks, dir)) self._ToggleLockInDir(move.orig, dir);
+    fn _RemoveLocksAt(self: *Self, pos: u7) void {
+        _ = self;
+        _ = pos;
+        //TODO
     }
 
-    fn _RemoveDestLocks(self: *Self, move: *Move) void {
-        const oldLocks = self.combatLocks[move.dest];
-        move.destLock = oldLocks;
-        for (DIRS) |dir| if (Has(oldLocks, dir)) self._ToggleLockInDir(move.dest, dir);
-    }
-
-    fn _SwapPieces(self: *Self, a: u7, b: u7, pieceA: u3, pieceB: u3) void {
+    fn _SwapPieces(self: *Self, a: u7, b: u7, pieceA: u4, pieceB: u4) void {
         if (DoValidation and a == b) @panic("Destination was Origin for swap");
-        self.pieces[pieceA] ^= ONE << a;
-        self.pieces[pieceA] ^= ONE << b;
-        self.pieces[pieceB] ^= ONE << a;
-        self.pieces[pieceB] ^= ONE << b;
-        const aReg: u81 = Bit(self.regalia, a);
-        const bReg: u81 = Bit(self.regalia, b);
-        self.regalia = self.regalia & ~(aReg << a | bReg << b) | (aReg << b | bReg << a);
+        self._MovePiece(a, b, pieceA);
+        self._MovePiece(b, a, pieceB);
     }
 
-    fn _MovePiece(self: *Self, orig: u7, dest: u7, piece: u3) void {
-        //if (DoValidation and dest == orig) @panic("Destination was Origin for move");
-        self.pieces[piece] ^= ONE << orig;
-        self.pieces[piece] ^= ONE << dest;
-        if (dest != orig) {
-            self.regalia |= @as(u81, Bit(self.regalia, orig)) << dest;
-            self.regalia &= ~(ONE << orig);
+    fn _MovePiece(self: *Self, orig: u7, dest: u7, piece: u4) void {
+        self.pieces[piece] ^= BB_ONE << orig;
+        self.pieces[piece] ^= BB_ONE << dest;
+    }
+
+    fn _RemovePiece(self: *Self, pos: u7, piece: u4) void {
+        self.pieces[piece] &= ~(BB_ONE << pos);
+    }
+
+    fn _AddRegalia(self: *Self, pos: u7, piece: u4) void {
+        self.pieces[piece & ~(1<<4)] &= ~(BB_ONE << pos); //Toggle off origin
+        self.pieces[piece | (1<<4)] |= (BB_ONE << pos); //Toggle on 
+    }
+
+    fn _RemoveRegalia(self: *Self, pos: u7, piece: u4) void {
+        self.pieces[piece | (1<<4)] &= ~(BB_ONE << pos); //Toggle off
+        self.pieces[piece & ~(1<<4)] |= (BB_ONE << pos); //Toggle on 
+    }
+
+    fn _ToggleRegalia(self: *Self, pos: u7, piece: u4) void {
+        self.pieces[piece] ^= (BB_ONE << pos); //Toggle off origin
+        self.pieces[(1<<4) ^ piece] ^= (BB_ONE << pos); //Toggle on 
+    }
+
+    fn _AddLockInDir(self: *Self, pos: u7, dir: u2) void {
+        switch (dir) {
+            0 => self.lockright |= BB_ONE << (pos),
+            1 => self.lockup |= BB_ONE << (pos),
+            2 => self.lockright |= BB_ONE << (pos - SHL),
+            3 => self.lockup |= BB_ONE << (pos - SHD),
         }
     }
 
-    ///We dont need to delete regalia since if a piece is killed the occupier always gains regalia
-    fn _RemovePiece(self: *Self, pos: u7, piece: u3) void {
-        self.pieces[piece] &= ~(ONE << pos);
-    }
-
-    fn _AddRegalia(self: *Self, pos: u7) void {
-        self.regalia |= ONE << pos;
-    }
-
-    fn _RemoveRegalia(self: *Self, pos: u7) void {
-        self.regalia &= ~(ONE << pos);
-    }
-
-    fn _ToggleLockInDir(self: *Self, pos: u7, dir: u4) void {
-        self.combatLocks[pos] ^= dir;
-        self.combatLocks[NewPos(pos, dir)] ^= ConverseDir(dir);
-    }
-
     fn StandAloneGenMovesFor(self: Self, pos: u7) !PYPTR {
-        var array = Vec(Move).init(gAllocator);
+        var array = ArrayList(Move).init(gAllocator);
         if (DoValidation and self.PieceAt(pos) == null) return error.Cannot_Generate_Moves_for_Null;
         const pieceAt = self.PieceAt(pos).?;
         //std.debug.print("NoNullPiece\n", .{});
@@ -420,7 +342,7 @@ pub const Board = struct {
     }
 
     ///Deprecated
-    fn GenerateMovesFor(self: Self, array: *Vec(Move), color: u1, pos: u7, piece: u2) !void {
+    fn GenerateMovesFor(self: Self, array: *ArrayList(Move), color: u1, pos: u7, piece: u2) !void {
         const allies = BlockersForColor(self, color);
         const enemies = BlockersForColor(self, ~color);
         const blockers = allies | enemies;
@@ -430,7 +352,7 @@ pub const Board = struct {
         var _lockers: BitBoard = 0;
         for (DIRS) |dir| {
             if (Has(locks, dir)) {
-                _lockers |= ONE << NewPos(pos, dir);
+                _lockers |= BB_ONE << NewPos(pos, dir);
             }
         }
         const ownRegalia = Bit(self.regalia, pos);
@@ -441,7 +363,7 @@ pub const Board = struct {
         const ownpow = self.PowerAt(pos);
         //std.debug.print("Got own pow\n", .{});
 
-        const rawmoves = MoveLib.MoveMap(pos, blockers, spd) | ONE << pos;
+        const rawmoves = MoveLib.MoveMap(pos, blockers, spd) | BB_ONE << pos;
         const capmap = MoveLib.CaptureConvolve(rawmoves, piece);
         const finalmoves = if (ARTDIAGMOVE) (capmap & ~blockers) else (MoveLib.CaptureConvolve(rawmoves, 0) & ~blockers);
         var threatened = enemies & capmap;
@@ -454,17 +376,17 @@ pub const Board = struct {
 
         while (threatened != 0) {
             const dest: u7 = LogHSB(threatened);
-            threatened ^= ONE << dest;
-            const tpow = if (Has(_lockers, ONE << dest)) 0 else ownpow;
+            threatened ^= BB_ONE << dest;
+            const tpow = if (Has(_lockers, BB_ONE << dest)) 0 else ownpow;
             if (self.AttackersOn(dest) + tpow > self.PowerAt(dest)) {
                 if (dest == enemKing and Bit(self.regalia, enemKing) == 1) {
                     _kingCap = dest;
                     //std.debug.print("Enemy king capture possible!\n", .{});
                 } else {
-                    _capable |= ONE << dest;
+                    _capable |= BB_ONE << dest;
                 }
             } else {
-                _atkable |= ONE << dest;
+                _atkable |= BB_ONE << dest;
             }
         }
         const capable = _capable & ~_lockers;
@@ -478,7 +400,7 @@ pub const Board = struct {
         targetbuf = caplockers;
         while (targetbuf != 0) {
             const dest: u7 = LogHSB(targetbuf);
-            targetbuf ^= ONE << dest;
+            targetbuf ^= BB_ONE << dest;
             try array.append(Move{ .kind = .capture, .orig = pos, .dest = dest });
         }
 
@@ -491,7 +413,7 @@ pub const Board = struct {
                 targetbuf = swaptars;
                 while (targetbuf != 0) {
                     const dest: u7 = LogHSB(targetbuf);
-                    targetbuf ^= ONE << dest;
+                    targetbuf ^= BB_ONE << dest;
                     try array.append(Move{.kind = .swap, .orig = pos, .dest = dest});
                 }
             }
@@ -510,7 +432,7 @@ pub const Board = struct {
             targetbuf = capable;
             while (targetbuf != 0) {
                 const dest: u7 = LogHSB(targetbuf);
-                targetbuf ^= ONE << dest;
+                targetbuf ^= BB_ONE << dest;
                 try array.append(Move{ .kind = .capture, .orig = pos, .dest = dest, .doRet = locked});
             }
 
@@ -523,7 +445,7 @@ pub const Board = struct {
                 targetbuf = atkorigs;
                 while (targetbuf != 0) {
                     const dest: u7 = LogHSB(targetbuf);
-                    targetbuf ^= ONE << dest;
+                    targetbuf ^= BB_ONE << dest;
                     try array.append(Move{ .kind = .attack, .orig = pos, .dest = dest, .atkDir = LogHSB(dir), .doRet = locked});
             }
             }
@@ -532,7 +454,7 @@ pub const Board = struct {
             targetbuf = finalmoves;
             while (targetbuf != 0) {
                 const dest: u7 = LogHSB(targetbuf);
-                targetbuf ^= ONE << dest;
+                targetbuf ^= BB_ONE << dest;
                 try array.append(Move{ .kind = .move, .orig = pos, .dest = dest, .doRet = locked});
             }
         } else {
@@ -551,7 +473,7 @@ pub const Board = struct {
         var _lockers: BitBoard = 0;
         for (DIRS) |dir| {
             if (Has(locks, dir)) {
-                _lockers |= ONE << NewPos(pos, dir);
+                _lockers |= BB_ONE << NewPos(pos, dir);
             }
         }
         const ownRegalia = Bit(self.regalia, pos);
@@ -562,7 +484,7 @@ pub const Board = struct {
         const ownpow = self.PowerAt(pos);
         //std.debug.print("Got own pow\n", .{});
 
-        const rawmoves = MoveLib.MoveMap(pos, blockers, spd) | ONE << pos;
+        const rawmoves = MoveLib.MoveMap(pos, blockers, spd) | BB_ONE << pos;
         const capmap = MoveLib.CaptureConvolve(rawmoves, piece);
         const finalmoves = if (ARTDIAGMOVE) (capmap & ~blockers) else (MoveLib.CaptureConvolve(rawmoves, 0) & ~blockers);
         var threatened = enemies & capmap;
@@ -575,17 +497,17 @@ pub const Board = struct {
 
         while (threatened != 0) {
             const dest: u7 = LogHSB(threatened);
-            threatened ^= ONE << dest;
-            const tpow = if (Has(_lockers, ONE << dest)) 0 else ownpow;
+            threatened ^= BB_ONE << dest;
+            const tpow = if (Has(_lockers, BB_ONE << dest)) 0 else ownpow;
             if (self.AttackersOn(dest) + tpow > self.PowerAt(dest)) {
                 if (dest == enemKing and Bit(self.regalia, enemKing) == 1) {
                     _kingCap = dest;
                     //std.debug.print("Enemy king capture possible!\n", .{});
                 } else {
-                    _capable |= ONE << dest;
+                    _capable |= BB_ONE << dest;
                 }
             } else {
-                _atkable |= ONE << dest;
+                _atkable |= BB_ONE << dest;
             }
         }
         const capable = _capable & ~_lockers;
@@ -599,7 +521,7 @@ pub const Board = struct {
         targetbuf = caplockers;
         while (targetbuf != 0) {
             const dest: u7 = LogHSB(targetbuf);
-            targetbuf ^= ONE << dest;
+            targetbuf ^= BB_ONE << dest;
             buffer.Append(Move{ .kind = .capture, .orig = pos, .dest = dest });
         }
 
@@ -612,7 +534,7 @@ pub const Board = struct {
                 targetbuf = swaptars;
                 while (targetbuf != 0) {
                     const dest: u7 = LogHSB(targetbuf);
-                    targetbuf ^= ONE << dest;
+                    targetbuf ^= BB_ONE << dest;
                     buffer.Append(Move{.kind = .swap, .orig = pos, .dest = dest});
                 }
             }
@@ -631,7 +553,7 @@ pub const Board = struct {
             targetbuf = capable;
             while (targetbuf != 0) {
                 const dest: u7 = LogHSB(targetbuf);
-                targetbuf ^= ONE << dest;
+                targetbuf ^= BB_ONE << dest;
                 buffer.Append(Move{ .kind = .capture, .orig = pos, .dest = dest, .doRet = locked});
             }
 
@@ -644,7 +566,7 @@ pub const Board = struct {
                 targetbuf = atkorigs;
                 while (targetbuf != 0) {
                     const dest: u7 = LogHSB(targetbuf);
-                    targetbuf ^= ONE << dest;
+                    targetbuf ^= BB_ONE << dest;
                     buffer.Append(Move{ .kind = .attack, .orig = pos, .dest = dest, .atkDir = LogHSB(dir), .doRet = locked});
             }
             }
@@ -653,7 +575,7 @@ pub const Board = struct {
             targetbuf = finalmoves;
             while (targetbuf != 0) {
                 const dest: u7 = LogHSB(targetbuf);
-                targetbuf ^= ONE << dest;
+                targetbuf ^= BB_ONE << dest;
                 buffer.Append(Move{ .kind = .move, .orig = pos, .dest = dest, .doRet = locked});
             }
         } else {
@@ -662,12 +584,12 @@ pub const Board = struct {
     }
 
     ///Deprecated
-    fn GenerateAllColorSingleMoves(self: Self, array: *Vec(Move), color: u1) !void {
+    fn GenerateAllColorSingleMoves(self: Self, array: *ArrayList(Move), color: u1) !void {
         for ([_]u2{2, 3, 1, 0}) |piece| {
             var pieces = self.pieces[4*@as(u4, color) + piece];
             while (pieces != 0){
                 const pos: u7 = LogHSB(pieces);
-                pieces ^= ONE << pos;
+                pieces ^= BB_ONE << pos;
 
                 if (self.PieceAt(pos) == null) std.debug.panic("Ahhh, pos is {}\n", .{pos});
                 try self.GenerateMovesFor(array, color, pos, piece);
@@ -680,7 +602,7 @@ pub const Board = struct {
             var pieces = self.pieces[4*@as(u4, color) + piece];
             while (pieces != 0){
                 const pos: u7 = LogHSB(pieces);
-                pieces ^= ONE << pos;
+                pieces ^= BB_ONE << pos;
                 if (DoValidation and pos > 81) std.debug.panic("Bit piece is out of bounds at `{}`", .{pos});
 
                 if (self.PieceAt(pos) == null) std.debug.panic("Ahhh, pos is {}\n", .{pos});
@@ -715,13 +637,13 @@ pub const Board = struct {
     }
 
     pub fn GenerateRandomMove(self: *Self, rand: *std.Random, color: u1) ![2]Move {
-        var singlemoves = Vec(Move).init(gAllocator);
+        var singlemoves = ArrayList(Move).init(gAllocator);
         try self.GenerateAllColorSingleMoves(&singlemoves, color);
         const firstidx = rand.uintLessThanBiased(u32, @intCast(singlemoves.items.len));
         const _initmove = singlemoves.items[firstidx];
 
 
-        var secmoves = Vec(Move).init(gAllocator);
+        var secmoves = ArrayList(Move).init(gAllocator);
         var initmove = _initmove;
 
         const copy = self.*;
@@ -752,7 +674,7 @@ inline fn LogHSB(val: BitBoard) u7 {
     return @intCast((bitSize - 1) - @clz(val));
 }
 test "LogHSB" {
-    try AssertEql(LogHSB(ONE << 17), 17);
+    try AssertEql(LogHSB(BB_ONE << 17), 17);
 }
 
 fn CanGoDir(dir: u4, pos: u7) bool {
@@ -794,6 +716,14 @@ fn NewPos(pos: u7, dir: u4) u7 {
     };
 }
 
+fn Offset(pos: u7, dir: u2) u7 {
+    return pos + switch (dir) {
+        0 => SHR,
+        1 => SHU,
+        2 => SHL,
+        3 => SHD,
+    };
+}
 ///////////////////////////////////////////////////////////////////////////
 
 fn ConverseDir(dir: u4) u4 {
@@ -859,7 +789,7 @@ pub export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
 
 pub export fn PyGenAllMoves(ptr: PYPTR, color: u8) PYPTR {
     const bptr: *Board = ImportPtr(ptr);
-    //var array = Vec([2]Move).init(gAllocator);
+    //var array = ArrayList([2]Move).init(gAllocator);
     var buffer = DoubleMoveBuffer{};
     buffer.Init() catch unreachable;
     defer buffer.DeInit();
