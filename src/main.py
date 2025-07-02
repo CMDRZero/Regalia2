@@ -214,14 +214,14 @@ def UpdatePotMoves(pos: int) -> list:
     moveInfo = []
     moves = ZigGenMoves(state.handle, pos)
     for move, zm in moves:
-        pos = list(divmod(move['dest'], 9))[::-1]
+        pos = list(divmod(move['dest'], 11))[::-1]
         rp = tarsqr
         if move['kind'] in [2, 6]:
             rp = (vatktar, hatktar)[move['atkDir'] % 2]
             pos[0] += (1, 0, -1, 0)[move['atkDir']]/2
             pos[1] += (0, 1, 0, -1)[move['atkDir']]/2
         dc = move['doRet']
-        orig = list(divmod(move['orig'], 9))[::-1]
+        orig = list(divmod(move['orig'], 11))[::-1]
         print(zm, move)
         moveInfo.append((pos[:], rp, (dc, orig[:], pos[:]), move, zm))
     return moveInfo
@@ -267,20 +267,24 @@ boardstr = \
 '   .cic.   '       +'\n'+ \
 '   .i i.   '
 
-ZigInitAlloc()
+#ZigInitAlloc()
+ZigInitAlloc2()
+
+print(f'Init should be `{InitStrFromSetup(boardstr)}`')
 
 state = Board()
 state.AddNewHandle()
-state.FromInitStr(InitStrFromSetup(boardstr))
+ZigInitBoardFromStr2(state.handle, InitStrFromSetup(boardstr).encode())
 
 #ZigGenAllMoves(state.handle, 1)
-print("Computed move is :", ZigCompMove(state.handle))
+#print("Computed move is :", ZigCompMove(state.handle))
 
 #state.ApplyMove(1 << 1 | 46 << 9)
 #state.ApplyMove(2 << 1 | 2 << 9)
 #state.ApplyMove(47 << 1 | 47 << 9)
 #state.ApplyMove(2 << 1 | 2 << 9)
 state.PullState()
+state.RegenRender()
 print('Moved')
 
 moveInfo = []
@@ -308,7 +312,7 @@ while run:
             mposf = [round(2*x)/2 for x in mpos]
             if moveInfo == []:
                 if tuple(mposc) in board:
-                    moveInfo = UpdatePotMoves(9*mposc[1] + mposc[0])
+                    moveInfo = UpdatePotMoves(11*mposc[1] + mposc[0])
             else:
                 for pos, rp, rend, move, zm in moveInfo:
                     if mposf == pos:

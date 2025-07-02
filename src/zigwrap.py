@@ -22,12 +22,14 @@ PyPtr = u64
 
 parent = '\\'.join(__file__.split('\\')[:-2])
 _enginelib = ctypes.CDLL(f'{parent}\\engine.dll')
+_enginelib2 = ctypes.CDLL(f'{parent}\\engine2.dll')
 
-_enginelib.PyGenMoves.argtypes = (PyPtr, u8)
-_enginelib.PyGenMoves.restype = POINTER(u32)
+_enginelib2.PyGenMoves.argtypes = (PyPtr, u8)
+_enginelib2.PyGenMoves.restype = POINTER(u32)
 #@AutoAnnot
 def ZigGenMoves(ptr: PyPtr, pos: u8) -> list[int]:
-    retptr = _enginelib.PyGenMoves(ptr, pos)
+    print("Calling GenMoves")
+    retptr = _enginelib2.PyGenMoves(ptr, pos)
     res = []
     for i in range(10_000):
         if (retptr[i] >> 0 % (1 << 3)) == 0:
@@ -56,22 +58,46 @@ _enginelib.PyNewBoardHandle.restype = PyPtr
 def ZigNewBoardHandle() -> PyPtr:
     return int(_enginelib.PyNewBoardHandle())
 
+_enginelib2.PyNewBoardHandle.argtypes = ()
+_enginelib2.PyNewBoardHandle.restype = PyPtr
+#@AutoAnnot
+def ZigNewBoardHandle2() -> PyPtr:
+    return int(_enginelib2.PyNewBoardHandle())
+
 _enginelib.PyInitAlloc.argtypes = ()
 _enginelib.PyInitAlloc.restype = void
 #@AutoAnnot
 def ZigInitAlloc() -> None:
     _enginelib.PyInitAlloc()
 
+_enginelib2.PyInitAlloc.argtypes = ()
+_enginelib2.PyInitAlloc.restype = void
+#@AutoAnnot
+def ZigInitAlloc2() -> None:
+    _enginelib2.PyInitAlloc()
+
 _enginelib.PyInitBoardFromStr.argtypes = (PyPtr, cStr)
 _enginelib.PyInitBoardFromStr.restype = void
 def ZigInitBoardFromStr(ptr: PyPtr, board: str) -> None:
     _enginelib.PyInitBoardFromStr(ptr, cStr(bytes(board)))
+
+_enginelib2.PyInitBoardFromStr.argtypes = (PyPtr, cStr)
+_enginelib2.PyInitBoardFromStr.restype = void
+def ZigInitBoardFromStr2(ptr: PyPtr, board: str) -> None:
+    _enginelib2.PyInitBoardFromStr(ptr, cStr(bytes(board)))
 
 _enginelib.PyGenInitStr.argtypes = (PyPtr, PyPtr)
 _enginelib.PyGenInitStr.restype = void
 def ZigGenInitStr(ptr: PyPtr) -> str:
     buf = Pointer((u8 * 162)(0))
     _enginelib.PyGenInitStr(ptr, ctypes.addressof(buf.contents))
+    return ''.join([chr(x) for x in buf.contents])
+
+_enginelib2.PyGenInitStr.argtypes = (PyPtr, PyPtr)
+_enginelib2.PyGenInitStr.restype = void
+def ZigGenInitStr2(ptr: PyPtr) -> str:
+    buf = Pointer((u8 * 162)(0))
+    _enginelib2.PyGenInitStr(ptr, ctypes.addressof(buf.contents))
     return ''.join([chr(x) for x in buf.contents])
 
 
@@ -140,7 +166,7 @@ class Board:
         self.handle = None
         
     def AddNewHandle(self):
-        self.handle = ZigNewBoardHandle()
+        self.handle = ZigNewBoardHandle2()
         pass
 
 
@@ -149,7 +175,7 @@ class Board:
         ZigInitBoardFromStr(self.handle, initstr.encode())
         
     def PullState(self):
-        initstr = ZigGenInitStr(self.handle)
+        initstr = ZigGenInitStr2(self.handle)
         print(initstr)
         self.LocFromInitStr(initstr)
 
