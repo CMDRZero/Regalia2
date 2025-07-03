@@ -106,7 +106,7 @@ pub const Board = struct {
     toPlay: u1,
 
     const default: Self = .{
-        .lockright = 0,
+        .lockright = 1<<11,
         .lockup = 0,
         .pieces = b: {
             const white = [16]BitBoard{
@@ -115,7 +115,7 @@ pub const Board = struct {
                 BitAt(3, 0) | BitAt(5, 0), //Basic Art
                 0,
                 0,
-                0,
+                1<<11, //DEBUG!!!
                 0,
                 BitAt(4, 0), //King
                 0, //Black starts here and we fill in them as a copy of white
@@ -327,11 +327,12 @@ pub const Board = struct {
         const moveKind: MoveKind = move.kind;
         if (moveKind == .null) return;
 
-        const ownPiece = self.PieceAt(move.orig).?; //Checked by validate
+        var ownPiece = self.PieceAt(move.orig).?; //Checked by validate
 
         if (move.doRet) {
             self._RemoveRegalia(move.orig, ownPiece);
             self._RemoveLocksAt(move.orig);
+            ownPiece = ownPiece & @as(u4, @truncate(INV_REGBUT));
         }
 
         const destPiece = self.PieceAt(move.dest); //May be null, but if so is never used.
@@ -424,10 +425,10 @@ pub const Board = struct {
     }
 
     fn GenerateLockerMask(self: Self, bit: BitBoard) BitBoard {
-        return (self.lockright & bit) >> SHR
-            | (self.lockright & (bit << SHR))
-            | (self.lockup & bit) >> SHU
-            | (self.lockup & (bit << SHU));
+        return (self.lockright & bit) << SHR
+            | (self.lockright & (bit >> SHR))
+            | (self.lockup & bit) << SHU
+            | (self.lockup & (bit >> SHU));
     }
 
     ///////////////////////////////////////////////////////////////////////
@@ -449,6 +450,7 @@ pub const Board = struct {
         };
 
 
+        try Moves.Cavalry(self, precalc, context, Handle, self.GetBoard("cavalry", true, color), 1, false);
         try Moves.Cavalry(self, precalc, context, Handle, self.GetBoard("cavalry", false, color), 0, false);
     }
 
@@ -465,8 +467,8 @@ pub const Board = struct {
             std.debug.print("Cavalry Call.\nBoard is {}\n", .{pieces});
             std.debug.print("All pieces is {any}\n", .{board.pieces});
 
-            var instakillable: BitBoard = 0; //defined as having netHP less than or equal 0. Means can kill even if in lock. Subset of killable
-            var killable: BitBoard = 0; //defined as having netHP less than or equal to the atk power of attack. Means can kill if new attacker
+            var instakillable: BitBoard = 0; //defined as having netHP less than 0. Means can kill even if in lock. Subset of killable
+            var killable: BitBoard = 0; //defined as having netHP less than to the atk power of attack. Means can kill if new attacker
             //var unkillable: BitBoard = 0; //Having greater than the attack power
 
             const atkPow: u8 = ATKPOW[Board.GetBoardIdx("cavalry", regalia != 0, 0) % 8];
@@ -479,11 +481,12 @@ pub const Board = struct {
 
                 const sumAtk = board.AttackersOn(hsb);
                 const hp = board.PowerAt(hsb);
-                instakillable ^= if (hp <= sumAtk) bit else 0; //(hp - sumAtk <= 0)  -->  (hp <= sumatk)
-                killable ^= if (hp <= sumAtk + atkPow) bit else 0; //(hp - sumAtk <= atkPow)  -->  (hp <= sumatk + atkPow)
-                //unkillable ^= if (hp > sumAtk + atkPow) bit else 0; //(hp - sumAtk > atkPow)  -->  (hp > sumatk + atkPow)
+                instakillable ^= if (hp < sumAtk) bit else 0; //(hp - sumAtk < 0)  -->  (hp <= sumatk)
+                killable ^= if (hp < sumAtk + atkPow) bit else 0; //(hp - sumAtk < atkPow)  -->  (hp <= sumatk + atkPow)
+                //unkillable ^= if (hp > sumAtk + atkPow) bit else 0; //(hp - sumAtk >= atkPow)  -->  (hp > sumatk + atkPow)
             }
 
+            var sacMask: BitBoard = 0;
 
             var bitset = pieces;
             while (bitset != 0) {
@@ -492,11 +495,14 @@ pub const Board = struct {
                 bitset ^= bit;
 
                 const locker = board.GenerateLockerMask(bit);
+                const lockbit = if (!didSac and locker != 0) bit else 0;
+                sacMask |= lockbit;
                 const capturable = (killable & ~locker) | instakillable; //You can capture any target thats either killable or instakillable if its locking you
+                std.debug.print("lockers: {x}\nkillable: {x}\ninsta: {x}\ncapable: {x}\n", .{locker, killable, instakillable, capturable});
 
                 var dests_ = bit;
-                dests_ = MoveConvolve(dests_) & ~precalc.blockers;
-                dests_ = MoveConvolve(dests_) & ~precalc.blockers;
+                if (lockbit == 0) dests_ = MoveConvolve(dests_) & ~precalc.blockers;
+                if (lockbit == 0) dests_ = MoveConvolve(dests_) & ~precalc.blockers | bit;
                 const move3 = MoveConvolve(dests_);
 
                 const movedests = move3 & ~precalc.blockers;
@@ -519,7 +525,7 @@ pub const Board = struct {
 
                 //Do attacks
                 inline for (DIRS, 0..) |diroffset, diridx| {
-                    tarset = move3 & std.math.shr(BitBoard, precalc.enemies ^ capturable, -diroffset); 
+                    tarset = dests_ & std.math.shl(BitBoard, (precalc.enemies ^ capturable) & ~locker , -diroffset); 
                     while (tarset != 0) {
                         const thsb = LogHSB(tarset);
                         const tarbit = BB_ONE << thsb;
@@ -536,19 +542,26 @@ pub const Board = struct {
                 }
 
                 //Do moves
-                tarset = movedests;
-                while (tarset != 0) {
-                    const thsb = LogHSB(tarset);
-                    const tarbit = BB_ONE << thsb;
-                    tarset ^= tarbit;
+                if (lockbit == 0) {
+                    tarset = movedests;
+                    while (tarset != 0) {
+                        const thsb = LogHSB(tarset);
+                        const tarbit = BB_ONE << thsb;
+                        tarset ^= tarbit;
 
-                    Handle(context, Move{
-                        .kind = .move,
-                        .orig = hsb,
-                        .dest = thsb,
-                        .doRet = didSac,
-                    });
+                        Handle(context, Move{
+                            .kind = .move,
+                            .orig = hsb,
+                            .dest = thsb,
+                            .doRet = didSac,
+                        });
+                    }
                 }
+            }
+
+            if (regalia != 0) {
+                std.debug.print("Do sac check.\n", .{});
+                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
     };
@@ -749,10 +762,17 @@ pub export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
 //    bptr.GenInitStr(sbuf);
 //}
 
-//pub export fn PyBoardApplyMove(ptr: PYPTR, mov: u32) void {
-//    var move: Move = @bitCast(mov);
-//    ImportPtr(ptr).ApplyMove(&move);
-//}
+pub export fn PyBoardApplyMove(ptr: PYPTR, mov: u32) void {
+    const imove: PackedMove = @bitCast(mov);
+    const move = Move {
+        .orig = imove.orig,
+        .atkdir = imove.atkdir,
+        .dest = imove.dest,
+        .doRet = imove.doRet,
+        .kind = imove.kind,
+    };
+    ImportPtr(ptr).ApplyMove(move);
+}
 
 test "Test all" {
     std.testing.refAllDeclsRecursive(@This());

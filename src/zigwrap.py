@@ -101,11 +101,11 @@ def ZigGenInitStr2(ptr: PyPtr) -> str:
     return ''.join([chr(x) for x in buf.contents])
 
 
-_enginelib.PyBoardApplyMove.argtypes = (PyPtr, u32)
-_enginelib.PyBoardApplyMove.restype = void
+_enginelib2.PyBoardApplyMove.argtypes = (PyPtr, u32)
+_enginelib2.PyBoardApplyMove.restype = void
 #@AutoAnnot
 def ZigBoardApplyMove(ptr, move) -> None:
-    _enginelib.PyBoardApplyMove(ptr, move)
+    _enginelib2.PyBoardApplyMove(ptr, move)
 
 _enginelib.PyPlayOutBoard.argtypes = (PyPtr,)
 _enginelib.PyPlayOutBoard.restype = i8
