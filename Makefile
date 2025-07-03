@@ -17,3 +17,12 @@ profile:
 	perf script > perf/out.perf
 	./perf/FlameGraph-master/stackcollapse-perf.pl perf/out.perf > perf/out.folded
 	./perf/FlameGraph-master/flamegraph.pl perf/out.folded > perf/flamegraph.svg
+
+buildperf2:
+	../zig.exe build-exe src/enginetester.zig -O Debug -target x86_64-linux
+
+profile2:
+	perf record -F max -g ./enginetester
+	perf script > perf/out.perf
+	./perf/FlameGraph-master/stackcollapse-perf.pl perf/out.perf > perf/out.folded
+	./perf/FlameGraph-master/flamegraph.pl perf/out.folded > perf/flamegraph.svg

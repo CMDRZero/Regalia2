@@ -482,6 +482,7 @@ pub const Board = struct {
             firstmove: Move,
 
             fn PreHandle(outercontext: @This(), secondmove: Move) void {
+                if (secondmove.orig == outercontext.firstmove.dest) return;
                 const fullmove = FullMove {.moves = [2] Move {outercontext.firstmove, secondmove}};
                 Handle(outercontext.handleContext, fullmove);
             }
@@ -613,7 +614,7 @@ pub const Board = struct {
 
             if (regalia != 0) {
                 // std.debug.print("Do sac check.\n", .{});
-                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+                //try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
         
@@ -743,7 +744,7 @@ pub const Board = struct {
 
             if (regalia != 0) {
                 // std.debug.print("Do sac check.\n", .{});
-                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+                // try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
 
@@ -856,7 +857,7 @@ pub const Board = struct {
 
             if (regalia != 0) {
                 // std.debug.print("Do sac check.\n", .{});
-                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+                // try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
 
@@ -969,7 +970,7 @@ pub const Board = struct {
 
             if (regalia != 0) {
                 // std.debug.print("Do sac check.\n", .{});
-                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+                // try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
     };
