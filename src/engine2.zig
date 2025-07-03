@@ -5,7 +5,7 @@ const AssertEql = std.testing.expectEqual;
 
 ///////////////////////////////////////////////////////////////////////////
 
-const DoValidation: bool = true;
+const DoValidation: bool = false;
 
 ///////////////////////////////////////////////////////////////////////////
 
@@ -465,6 +465,35 @@ pub const Board = struct {
         try Moves.King(self, precalc, context, Handle, self.GetBoard("king", false, color), 0, false);
     }
 
+    fn StreamAllFullMoves(self: Self, comptime color: comptime_int, context: anytype, comptime Handle: fn (@TypeOf(context), FullMove) void) !void {
+        var buffer = SingleMoveBuffer.init(0) catch unreachable;
+        const Locals = struct {
+            buffptr: *SingleMoveBuffer,
+
+            fn BufferAppend(locals: @This(), item: Move) void {
+                locals.buffptr.appendAssumeCapacity(item);
+            }
+        };
+
+        try self.StreamAllSingleMoves(color, Locals {.buffptr = &buffer}, Locals.BufferAppend);
+
+        const WrapContext = struct {
+            handleContext: @TypeOf(context),
+            firstmove: Move,
+
+            fn PreHandle(outercontext: @This(), secondmove: Move) void {
+                const fullmove = FullMove {.moves = [2] Move {outercontext.firstmove, secondmove}};
+                Handle(outercontext.handleContext, fullmove);
+            }
+        };
+
+        for (buffer.slice()) |firstmove| {
+            var newstate = self;
+            newstate.ApplyMove(firstmove);
+            try newstate.StreamAllSingleMoves(color, WrapContext{.handleContext = context, .firstmove = firstmove}, WrapContext.PreHandle);
+        }
+    }
+
     const Moves = struct {
         const PreCalc = struct {
             allies: BitBoard,
@@ -583,7 +612,7 @@ pub const Board = struct {
             }
 
             if (regalia != 0) {
-                std.debug.print("Do sac check.\n", .{});
+                // std.debug.print("Do sac check.\n", .{});
                 try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
@@ -713,7 +742,7 @@ pub const Board = struct {
             }
 
             if (regalia != 0) {
-                std.debug.print("Do sac check.\n", .{});
+                // std.debug.print("Do sac check.\n", .{});
                 try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
@@ -826,7 +855,7 @@ pub const Board = struct {
             }
 
             if (regalia != 0) {
-                std.debug.print("Do sac check.\n", .{});
+                // std.debug.print("Do sac check.\n", .{});
                 try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
@@ -939,7 +968,7 @@ pub const Board = struct {
             }
 
             if (regalia != 0) {
-                std.debug.print("Do sac check.\n", .{});
+                // std.debug.print("Do sac check.\n", .{});
                 try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
             }
         }
@@ -1089,7 +1118,7 @@ pub export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
         pos: u7,
 
         fn BufferAppend(locals: Self, item: Move) void {
-            std.debug.print("Found move: {}\n", .{item});
+            // std.debug.print("Found move: {}\n", .{item});
             const pi = PackedMove {
                 .orig = item.orig,
                 .atkdir = item.atkdir,
@@ -1117,35 +1146,35 @@ pub export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
     return @intFromPtr(buffer.slice().ptr);
 }
 
-// pub export fn PyGenAllMoves(ptr: PYPTR, color: u8) PYPTR {
-//     _ = color;
-//     const bptr: *Board = ImportPtr(ptr);
-//     var buffer = SingleMoveBuffer.init(128) catch unreachable;
-//     var timer = std.time.Timer.start() catch unreachable;
+pub export fn PyGenAllMoves(ptr: PYPTR, color: u8) void {
+    const bptr: *Board = ImportPtr(ptr);
+    var timer = std.time.Timer.start() catch unreachable;
 
-//     const Locals = struct {
-//         const Self = @This();
-//         buffptr: *SingleMoveBuffer,
+    const Locals = struct {
+        count: usize = 0,
+        fn Count(locals: *@This(), item: FullMove) void {
+            locals.count += 1;
+            _ = item;
+        }
+    };
 
-//         fn BufferAppend(locals: Self, item: Move) void {
-//             locals.buffptr.appendAssumeCapacity(item);
-//         }
-//     };
 
-//     const locals = Locals {
-//         .buffptr = &buffer,
-//     };
+    var context = Locals{};
+    switch (color) {
+        inline 0, 1 => |compColor| for (0..1000) |_| {
+            context.count = 0;
+            try bptr.StreamAllFullMoves(compColor, &context, Locals.Count);
+        },
+        else => unreachable,
+    }
+    
 
-//     for (0..1) |_| {
-//         //buffer.Clear();
-//         bptr.StreamAllSingleMoves(0, locals, Locals.BufferAppend) catch unreachable;
-//     }
-//     const passed_ns = timer.read();
-//     //if (buffer.count != 3635) std.debug.panic("Array length was wrong, {} not 3635\n", .{buffer.count});
-//     //std.debug.print("Total double moves is: {}\n", .{array.items.len});
-//     std.debug.print("Time took was {d:.6}ms each\n", .{@as(f64, @floatFromInt(passed_ns))/std.time.ns_per_ms});
-//     return @intFromPtr(buffer.buffer.ptr);
-// }
+    const passed_ns = timer.read();
+    //if (buffer.count != 3635) std.debug.panic("Array length was wrong, {} not 3635\n", .{buffer.count});
+    std.debug.print("Total double moves is: {}\n", .{context.count});
+    std.debug.print("Time took was {d:.6}ms each\n", .{@as(f64, @floatFromInt(passed_ns))/1000/std.time.ns_per_ms});
+    return;
+}
 
 //pub export fn PyGenInitStr(ptr: PYPTR, buf: PYPTR) void {
 //    const bptr: *Board = ImportPtr(ptr);
