@@ -12,4 +12,5 @@ pub fn main() !void {
     var init: [182] u8 = @splat('\x01');
     _ = EngineLib.PyGenInitStr(handle, @intFromPtr(&init));
     std.debug.print("Got Str `{s}`\n", .{init});
+    _ = EngineLib.PyGenMoves(handle, 69);
 }

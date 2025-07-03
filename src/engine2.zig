@@ -165,7 +165,7 @@ pub const Board = struct {
             const x = idx_ % 9;
             const y = (idx_ / 9);
             const idx: u7 = @intCast(11 * y + x);
-            const coml: u8 = @truncate((self.lockright >> idx) & 1);
+            const coml: u8 = @truncate(((self.lockright >> idx) & 1) + (((self.lockup >> idx) & 1) << 1) + (((self.lockright >> 1 >> idx) & 1) << 2));
             //std.debug.print("{}", .{coml});
             buf[idx_ + 81] = 'a' + coml;
         }
@@ -244,10 +244,11 @@ pub const Board = struct {
     /// Sum of strength of combat lockers
     fn AttackersOn(self: Self, pos: u7) u8 {
         var sum: u8 = 0;
+        //std.debug.print("pos: {} vs SHU: {}\n", .{pos, SHU});
         const right = Bit(self.lockright, pos);
         const up = Bit(self.lockup, pos);
-        const left = Bit(self.lockright, pos - SHR);
-        const down = Bit(self.lockup, pos - SHU);
+        const left = Bit(self.lockright, pos -% SHR);
+        const down = Bit(self.lockup, pos -% SHU);
         sum += if (right != 0) self.PowerAt(pos + SHR) else 0;
         sum += if (up != 0) self.PowerAt(pos + SHU) else 0;
         sum += if (left != 0) self.PowerAt(pos - SHR) else 0;
@@ -378,7 +379,7 @@ pub const Board = struct {
     }
 
     fn _RemoveLocksAt(self: *Self, pos: u7) void {
-        self.lockright &= ~std.math.shl(BitBoard, 1 << 11 | 1, pos - 11);
+        self.lockright &= ~std.math.shl(BitBoard, 1 << 1 | 1, pos - 1);
         self.lockup &= ~std.math.shl(BitBoard, 1 << 11 | 1, pos - 11);
     }
 
@@ -449,9 +450,19 @@ pub const Board = struct {
             break :b _precalc;
         };
 
+        try Moves.Artillary(self, precalc, context, Handle, self.GetBoard("artillary", true, color), 1, false);
+        try Moves.Artillary(self, precalc, context, Handle, self.GetBoard("artillary", false, color), 0, false);
 
         try Moves.Cavalry(self, precalc, context, Handle, self.GetBoard("cavalry", true, color), 1, false);
         try Moves.Cavalry(self, precalc, context, Handle, self.GetBoard("cavalry", false, color), 0, false);
+
+        try Moves.Infantry(self, precalc, context, Handle, self.GetBoard("infantry", true, color) & precalc.zoneExc, 1, false, true);
+        try Moves.Infantry(self, precalc, context, Handle, self.GetBoard("infantry", false, color) & precalc.zoneExc, 0, false, true);
+        try Moves.Infantry(self, precalc, context, Handle, self.GetBoard("infantry", true, color) & ~precalc.zoneExc, 1, false, false);
+        try Moves.Infantry(self, precalc, context, Handle, self.GetBoard("infantry", false, color) & ~precalc.zoneExc, 0, false, false);
+
+        try Moves.King(self, precalc, context, Handle, self.GetBoard("king", true, color), 1, false);
+        try Moves.King(self, precalc, context, Handle, self.GetBoard("king", false, color), 0, false);
     }
 
     const Moves = struct {
@@ -462,14 +473,18 @@ pub const Board = struct {
             zoneExc: BitBoard,
         };
 
-        fn Cavalry(board: Board, precalc: PreCalc, context: anytype, comptime Handle: fn (@TypeOf(context), Move) void, pieces: BitBoard, comptime regalia: comptime_int, comptime didSac: bool) !void {
-
-            std.debug.print("Cavalry Call.\nBoard is {}\n", .{pieces});
-            std.debug.print("All pieces is {any}\n", .{board.pieces});
-
+        fn Cavalry (
+                board: Board, 
+                precalc: PreCalc, 
+                context: anytype, 
+                comptime Handle: fn (@TypeOf(context), Move) void, 
+                pieces: BitBoard, 
+                comptime regalia: 
+                comptime_int, 
+                comptime didRet: bool
+        ) !void {
             var instakillable: BitBoard = 0; //defined as having netHP less than 0. Means can kill even if in lock. Subset of killable
             var killable: BitBoard = 0; //defined as having netHP less than to the atk power of attack. Means can kill if new attacker
-            //var unkillable: BitBoard = 0; //Having greater than the attack power
 
             const atkPow: u8 = ATKPOW[Board.GetBoardIdx("cavalry", regalia != 0, 0) % 8];
 
@@ -483,7 +498,6 @@ pub const Board = struct {
                 const hp = board.PowerAt(hsb);
                 instakillable ^= if (hp < sumAtk) bit else 0; //(hp - sumAtk < 0)  -->  (hp <= sumatk)
                 killable ^= if (hp < sumAtk + atkPow) bit else 0; //(hp - sumAtk < atkPow)  -->  (hp <= sumatk + atkPow)
-                //unkillable ^= if (hp > sumAtk + atkPow) bit else 0; //(hp - sumAtk >= atkPow)  -->  (hp > sumatk + atkPow)
             }
 
             var sacMask: BitBoard = 0;
@@ -495,10 +509,10 @@ pub const Board = struct {
                 bitset ^= bit;
 
                 const locker = board.GenerateLockerMask(bit);
-                const lockbit = if (!didSac and locker != 0) bit else 0;
+                const lockbit = if (!didRet and locker != 0) bit else 0;
                 sacMask |= lockbit;
                 const capturable = (killable & ~locker) | instakillable; //You can capture any target thats either killable or instakillable if its locking you
-                std.debug.print("lockers: {x}\nkillable: {x}\ninsta: {x}\ncapable: {x}\n", .{locker, killable, instakillable, capturable});
+                //std.debug.print("lockers: {x}\nkillable: {x}\ninsta: {x}\ncapable: {x}\n", .{locker, killable, instakillable, capturable});
 
                 var dests_ = bit;
                 if (lockbit == 0) dests_ = MoveConvolve(dests_) & ~precalc.blockers;
@@ -520,7 +534,7 @@ pub const Board = struct {
                         .kind = .capture,
                         .orig = hsb,
                         .dest = thsb,
-                        .doRet = didSac,
+                        .doRet = didRet,
                     });
                 }
 
@@ -537,7 +551,7 @@ pub const Board = struct {
                                 .kind = .attack,
                                 .orig = hsb,
                                 .dest = thsb,
-                                .doRet = didSac,
+                                .doRet = didRet,
                                 .atkdir = diridx,
                             });
                         }
@@ -554,7 +568,7 @@ pub const Board = struct {
                             .kind = .move,
                             .orig = hsb,
                             .dest = thsb,
-                            .doRet = didSac,
+                            .doRet = didRet,
                         });
                     }
                 } else if (regalia == 0) {
@@ -563,7 +577,363 @@ pub const Board = struct {
                         .kind = .sacrifice,
                         .orig = hsb,
                         .dest = hsb,
-                        .doRet = didSac,
+                        .doRet = didRet,
+                    });
+                }
+            }
+
+            if (regalia != 0) {
+                std.debug.print("Do sac check.\n", .{});
+                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+            }
+        }
+        
+        fn Infantry (
+                board: Board, 
+                precalc: PreCalc, 
+                context: anytype, 
+                comptime Handle: fn (@TypeOf(context), Move) void, 
+                pieces: BitBoard, 
+                comptime regalia: 
+                comptime_int, 
+                comptime didRet: bool,
+                comptime zoneExc: bool,
+        ) !void {
+            var instakillable: BitBoard = 0; //defined as having netHP less than 0. Means can kill even if in lock. Subset of killable
+            var killable: BitBoard = 0; //defined as having netHP less than to the atk power of attack. Means can kill if new attacker
+
+            const atkPow: u8 = ATKPOW[Board.GetBoardIdx("inf", regalia != 0, 0) % 8];
+
+            var enemies = precalc.enemies;
+            while (enemies != 0) {
+                const hsb = LogHSB(enemies);
+                const bit = BB_ONE << hsb;
+                enemies ^= bit;
+
+                const sumAtk = board.AttackersOn(hsb);
+                const hp = board.PowerAt(hsb);
+                instakillable ^= if (hp < sumAtk) bit else 0; //(hp - sumAtk < 0)  -->  (hp <= sumatk)
+                killable ^= if (hp < sumAtk + atkPow) bit else 0; //(hp - sumAtk < atkPow)  -->  (hp <= sumatk + atkPow)
+            }
+
+            var sacMask: BitBoard = 0;
+
+            var bitset = pieces;
+            while (bitset != 0) {
+                const hsb = LogHSB(bitset);
+                const bit = BB_ONE << hsb;
+                bitset ^= bit;
+
+                const locker = board.GenerateLockerMask(bit);
+                const lockbit = if (!didRet and locker != 0) bit else 0;
+                sacMask |= lockbit;
+                const capturable = (killable & ~locker) | instakillable; //You can capture any target thats either killable or instakillable if its locking you
+                //std.debug.print("lockers: {x}\nkillable: {x}\ninsta: {x}\ncapable: {x}\n", .{locker, killable, instakillable, capturable});
+
+                var dests_ = bit;
+                if (lockbit == 0) dests_ = MoveConvolve(dests_) & ~precalc.blockers | bit;
+                if (zoneExc and lockbit == 0) dests_ = MoveConvolve(dests_) & ~precalc.blockers | bit;
+                const move3 = MoveConvolve(dests_);
+
+                const movedests = move3 & ~precalc.blockers;
+                const captars = move3 & capturable;
+
+                
+                //Do captures
+                var tarset: BitBoard = if (locker != 0) captars & locker else captars;
+                while (tarset != 0) {
+                    const thsb = LogHSB(tarset);
+                    const tarbit = BB_ONE << thsb;
+                    tarset ^= tarbit;
+
+                    Handle(context, Move{
+                        .kind = .capture,
+                        .orig = hsb,
+                        .dest = thsb,
+                        .doRet = didRet,
+                    });
+                }
+
+                if (regalia != 0) {
+                    inline for (DIRS) |dir| {
+                        const dest = if (dir > 0) hsb +% dir else hsb -% -dir;
+                        if (Bit(precalc.allies, dest) != 0) {
+                            Handle(context, Move {
+                                .kind = .swap,
+                                .orig = hsb,
+                                .dest = dest,
+                                .doRet = didRet,
+                            });
+                        }
+                    }
+                }
+
+                if (lockbit == 0) {
+                    //Do attacks
+                    inline for (DIRS, 0..) |diroffset, diridx| {
+                        tarset = dests_ & std.math.shl(BitBoard, (precalc.enemies ^ capturable) , -diroffset); 
+                        while (tarset != 0) {
+                            const thsb = LogHSB(tarset);
+                            const tarbit = BB_ONE << thsb;
+                            tarset ^= tarbit;
+
+                            Handle(context, Move{
+                                .kind = .attack,
+                                .orig = hsb,
+                                .dest = thsb,
+                                .doRet = didRet,
+                                .atkdir = diridx,
+                            });
+                        }
+                    }
+
+                    //Do moves
+                    tarset = movedests;
+                    while (tarset != 0) {
+                        const thsb = LogHSB(tarset);
+                        const tarbit = BB_ONE << thsb;
+                        tarset ^= tarbit;
+
+                        Handle(context, Move{
+                            .kind = .move,
+                            .orig = hsb,
+                            .dest = thsb,
+                            .doRet = didRet,
+                        });
+                    }
+                } else if (regalia == 0) {
+                    //Otherwise allow sacrifice
+                    Handle(context, Move{
+                        .kind = .sacrifice,
+                        .orig = hsb,
+                        .dest = hsb,
+                        .doRet = didRet,
+                    });
+                }
+            }
+
+            if (regalia != 0) {
+                std.debug.print("Do sac check.\n", .{});
+                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+            }
+        }
+
+        fn Artillary (
+                board: Board, 
+                precalc: PreCalc, 
+                context: anytype, 
+                comptime Handle: fn (@TypeOf(context), Move) void, 
+                pieces: BitBoard, 
+                comptime regalia: 
+                comptime_int, 
+                comptime didRet: bool
+        ) !void {
+            var instakillable: BitBoard = 0; //defined as having netHP less than 0. Means can kill even if in lock. Subset of killable
+            var killable: BitBoard = 0; //defined as having netHP less than to the atk power of attack. Means can kill if new attacker
+
+            const atkPow: u8 = ATKPOW[Board.GetBoardIdx("art", regalia != 0, 0) % 8];
+
+            var enemies = precalc.enemies;
+            while (enemies != 0) {
+                const hsb = LogHSB(enemies);
+                const bit = BB_ONE << hsb;
+                enemies ^= bit;
+
+                const sumAtk = board.AttackersOn(hsb);
+                const hp = board.PowerAt(hsb);
+                instakillable ^= if (hp < sumAtk) bit else 0; //(hp - sumAtk < 0)  -->  (hp <= sumatk)
+                killable ^= if (hp < sumAtk + atkPow) bit else 0; //(hp - sumAtk < atkPow)  -->  (hp <= sumatk + atkPow)
+            }
+
+            var sacMask: BitBoard = 0;
+
+            var bitset = pieces;
+            while (bitset != 0) {
+                const hsb = LogHSB(bitset);
+                const bit = BB_ONE << hsb;
+                bitset ^= bit;
+
+                const locker = board.GenerateLockerMask(bit);
+                const lockbit = if (!didRet and locker != 0) bit else 0;
+                sacMask |= lockbit;
+                const capturable = (killable & ~locker) | instakillable; //You can capture any target thats either killable or instakillable if its locking you
+                //std.debug.print("lockers: {x}\nkillable: {x}\ninsta: {x}\ncapable: {x}\n", .{locker, killable, instakillable, capturable});
+
+                const dests_ = bit;
+                const move3 = MoveConvolve(dests_);
+
+                const movedests = move3 & ~precalc.blockers;
+                const captars = MoveWideConvolve(dests_) & capturable;
+
+                
+                //Do captures
+                var tarset: BitBoard = if (locker != 0) captars & locker else captars;
+                while (tarset != 0) {
+                    const thsb = LogHSB(tarset);
+                    const tarbit = BB_ONE << thsb;
+                    tarset ^= tarbit;
+
+                    Handle(context, Move{
+                        .kind = .capture,
+                        .orig = hsb,
+                        .dest = thsb,
+                        .doRet = didRet,
+                    });
+                }
+
+                if (lockbit == 0) {
+                    //Do attacks
+                    inline for (DIRS, 0..) |diroffset, diridx| {
+                        tarset = dests_ & std.math.shl(BitBoard, (precalc.enemies ^ capturable) , -diroffset); 
+                        while (tarset != 0) {
+                            const thsb = LogHSB(tarset);
+                            const tarbit = BB_ONE << thsb;
+                            tarset ^= tarbit;
+
+                            Handle(context, Move{
+                                .kind = .attack,
+                                .orig = hsb,
+                                .dest = thsb,
+                                .doRet = didRet,
+                                .atkdir = diridx,
+                            });
+                        }
+                    }
+
+                    //Do moves
+                    tarset = movedests;
+                    while (tarset != 0) {
+                        const thsb = LogHSB(tarset);
+                        const tarbit = BB_ONE << thsb;
+                        tarset ^= tarbit;
+
+                        Handle(context, Move{
+                            .kind = .move,
+                            .orig = hsb,
+                            .dest = thsb,
+                            .doRet = didRet,
+                        });
+                    }
+                } else if (regalia == 0) {
+                    //Otherwise allow sacrifice
+                    Handle(context, Move{
+                        .kind = .sacrifice,
+                        .orig = hsb,
+                        .dest = hsb,
+                        .doRet = didRet,
+                    });
+                }
+            }
+
+            if (regalia != 0) {
+                std.debug.print("Do sac check.\n", .{});
+                try Moves.Cavalry(board, precalc, context, Handle, sacMask, 1-regalia, true);
+            }
+        }
+
+        fn King (
+                board: Board, 
+                precalc: PreCalc, 
+                context: anytype, 
+                comptime Handle: fn (@TypeOf(context), Move) void, 
+                pieces: BitBoard, 
+                comptime regalia: 
+                comptime_int, 
+                comptime didRet: bool
+        ) !void {
+            var instakillable: BitBoard = 0; //defined as having netHP less than 0. Means can kill even if in lock. Subset of killable
+            var killable: BitBoard = 0; //defined as having netHP less than to the atk power of attack. Means can kill if new attacker
+
+            const atkPow: u8 = ATKPOW[Board.GetBoardIdx("kng", regalia != 0, 0) % 8];
+
+            var enemies = precalc.enemies;
+            while (enemies != 0) {
+                const hsb = LogHSB(enemies);
+                const bit = BB_ONE << hsb;
+                enemies ^= bit;
+
+                const sumAtk = board.AttackersOn(hsb);
+                const hp = board.PowerAt(hsb);
+                instakillable ^= if (hp < sumAtk) bit else 0; //(hp - sumAtk < 0)  -->  (hp <= sumatk)
+                killable ^= if (hp < sumAtk + atkPow) bit else 0; //(hp - sumAtk < atkPow)  -->  (hp <= sumatk + atkPow)
+            }
+
+            var sacMask: BitBoard = 0;
+
+            var bitset = pieces;
+            while (bitset != 0) {
+                const hsb = LogHSB(bitset);
+                const bit = BB_ONE << hsb;
+                bitset ^= bit;
+
+                const locker = board.GenerateLockerMask(bit);
+                const lockbit = if (!didRet and locker != 0) bit else 0;
+                sacMask |= lockbit;
+                const capturable = (killable & ~locker) | instakillable; //You can capture any target thats either killable or instakillable if its locking you
+                //std.debug.print("lockers: {x}\nkillable: {x}\ninsta: {x}\ncapable: {x}\n", .{locker, killable, instakillable, capturable});
+
+                const dests_ = bit;
+                const move3 = MoveConvolve(dests_);
+
+                const movedests = move3 & ~precalc.blockers;
+                const captars = move3 & capturable;
+
+                
+                //Do captures
+                var tarset: BitBoard = if (locker != 0) captars & locker else captars;
+                while (tarset != 0) {
+                    const thsb = LogHSB(tarset);
+                    const tarbit = BB_ONE << thsb;
+                    tarset ^= tarbit;
+
+                    Handle(context, Move{
+                        .kind = .capture,
+                        .orig = hsb,
+                        .dest = thsb,
+                        .doRet = didRet,
+                    });
+                }
+
+                if (lockbit == 0) {
+                    //Do attacks
+                    inline for (DIRS, 0..) |diroffset, diridx| {
+                        tarset = dests_ & std.math.shl(BitBoard, (precalc.enemies ^ capturable) , -diroffset); 
+                        while (tarset != 0) {
+                            const thsb = LogHSB(tarset);
+                            const tarbit = BB_ONE << thsb;
+                            tarset ^= tarbit;
+
+                            Handle(context, Move{
+                                .kind = .attack,
+                                .orig = hsb,
+                                .dest = thsb,
+                                .doRet = didRet,
+                                .atkdir = diridx,
+                            });
+                        }
+                    }
+
+                    //Do moves
+                    tarset = movedests;
+                    while (tarset != 0) {
+                        const thsb = LogHSB(tarset);
+                        const tarbit = BB_ONE << thsb;
+                        tarset ^= tarbit;
+
+                        Handle(context, Move{
+                            .kind = .move,
+                            .orig = hsb,
+                            .dest = thsb,
+                            .doRet = didRet,
+                        });
+                    }
+                } else if (regalia == 0) {
+                    //Otherwise allow sacrifice
+                    Handle(context, Move{
+                        .kind = .sacrifice,
+                        .orig = hsb,
+                        .dest = hsb,
+                        .doRet = didRet,
                     });
                 }
             }
@@ -580,6 +950,12 @@ pub const Board = struct {
 
 inline fn MoveConvolve(x: BitBoard) BitBoard {
     return x | x << SHR | x << SHU | x >> SHR | x >> SHU;
+}
+
+inline fn MoveWideConvolve(x: BitBoard) BitBoard {
+    var ret = x | x << SHR | x >> SHR;
+    ret = ret | ret << SHU | ret >> SHU;
+    return ret;
 }
 
 fn BlockersForColor(self: Board, comptime color: comptime_int) BitBoard {
@@ -731,7 +1107,13 @@ pub export fn PyGenMoves(ptr: PYPTR, pos: u8) PYPTR {
         .pos = @intCast(pos),
     };
 
-    bptr.StreamAllSingleMoves(0, locals, Locals.BufferAppend) catch |err| if (DoValidation) std.debug.panic("Stream Single Moves threw `{}`.\n", .{err}) else unreachable;
+    const piece = bptr.AssumedPieceAt(@intCast(pos));
+    switch (piece >> 3) {
+        inline 0, 1  => |color| bptr.StreamAllSingleMoves(color, locals, Locals.BufferAppend) catch |err| if (DoValidation) std.debug.panic("Stream Single Moves threw `{}`.\n", .{err}) else unreachable,
+        else => unreachable,
+    }
+
+    
     return @intFromPtr(buffer.slice().ptr);
 }
 
