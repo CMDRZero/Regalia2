@@ -106,7 +106,7 @@ pub const Board = struct {
     toPlay: u1,
 
     const default: Self = .{
-        .lockright = 1<<11,
+        .lockright = 0,
         .lockup = 0,
         .pieces = b: {
             const white = [16]BitBoard{
@@ -115,7 +115,7 @@ pub const Board = struct {
                 BitAt(3, 0) | BitAt(5, 0), //Basic Art
                 0,
                 0,
-                1<<11, //DEBUG!!!
+                0,
                 0,
                 BitAt(4, 0), //King
                 0, //Black starts here and we fill in them as a copy of white
@@ -508,8 +508,9 @@ pub const Board = struct {
                 const movedests = move3 & ~precalc.blockers;
                 const captars = move3 & capturable;
 
+                
                 //Do captures
-                var tarset: BitBoard = captars;
+                var tarset: BitBoard = if (locker != 0) captars & locker else captars;
                 while (tarset != 0) {
                     const thsb = LogHSB(tarset);
                     const tarbit = BB_ONE << thsb;
@@ -523,26 +524,26 @@ pub const Board = struct {
                     });
                 }
 
-                //Do attacks
-                inline for (DIRS, 0..) |diroffset, diridx| {
-                    tarset = dests_ & std.math.shl(BitBoard, (precalc.enemies ^ capturable) & ~locker , -diroffset); 
-                    while (tarset != 0) {
-                        const thsb = LogHSB(tarset);
-                        const tarbit = BB_ONE << thsb;
-                        tarset ^= tarbit;
-
-                        Handle(context, Move{
-                            .kind = .attack,
-                            .orig = hsb,
-                            .dest = thsb,
-                            .doRet = didSac,
-                            .atkdir = diridx,
-                        });
-                    }
-                }
-
-                //Do moves
                 if (lockbit == 0) {
+                    //Do attacks
+                    inline for (DIRS, 0..) |diroffset, diridx| {
+                        tarset = dests_ & std.math.shl(BitBoard, (precalc.enemies ^ capturable) , -diroffset); 
+                        while (tarset != 0) {
+                            const thsb = LogHSB(tarset);
+                            const tarbit = BB_ONE << thsb;
+                            tarset ^= tarbit;
+
+                            Handle(context, Move{
+                                .kind = .attack,
+                                .orig = hsb,
+                                .dest = thsb,
+                                .doRet = didSac,
+                                .atkdir = diridx,
+                            });
+                        }
+                    }
+
+                    //Do moves
                     tarset = movedests;
                     while (tarset != 0) {
                         const thsb = LogHSB(tarset);
@@ -556,6 +557,14 @@ pub const Board = struct {
                             .doRet = didSac,
                         });
                     }
+                } else if (regalia == 0) {
+                    //Otherwise allow sacrifice
+                    Handle(context, Move{
+                        .kind = .sacrifice,
+                        .orig = hsb,
+                        .dest = hsb,
+                        .doRet = didSac,
+                    });
                 }
             }
 
