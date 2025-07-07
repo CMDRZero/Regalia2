@@ -224,6 +224,15 @@ pub const Board = struct {
         return null;
     }
 
+    /// Slower, dont use
+    fn SimdAssumedPieceAt(self: Self, pos: u7) u4 {
+        var piecevec: @Vector(16, BitBoard) = self.pieces;
+        piecevec >>= @splat(pos);
+        piecevec &= @splat(1);
+        piecevec *= @TypeOf(piecevec) {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+        return @intCast(@reduce(.Or, piecevec));
+    }
+
     /// Maybe faster than `PieceAt(...).?`
     fn AssumedPieceAt(self: Self, pos: u7) u4 {
         for (0..16) |piece|
@@ -1070,7 +1079,7 @@ fn Has(x: anytype, y: anytype) bool {
 }
 
 fn Bit(x: BitBoard, y: anytype) u1 {
-    if (y > 121) return 0;
+    if (DoValidation) if (y > 121) return 0;
     return @intCast((x >> y) & 1);
 }
 

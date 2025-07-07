@@ -13,5 +13,5 @@ pub fn main() !void {
     _ = EngineLib.PyGenInitStr(handle, @intFromPtr(&init));
     std.debug.print("Got Str `{s}`\n", .{init});
     _ = EngineLib.PyGenMoves(handle, 69);
-    EngineLib.PyGenAllMoves(handle, 0);
+    EngineLib.PyGenAllMoves(handle, 1);
 }
